@@ -1,4 +1,57 @@
+<section class="landing-hero">
+  <div class="landing-hero-copy">
+    <div class="landing-profile">
+      <img class="landing-avatar" src="<%= asset('images/profile.jpg') %>" alt="Portrait of Nikola Winata" />
+      <div class="landing-profile-copy">
+        <h1>Nikola Winata</h1>
+        <p class="landing-kicker">CTF competitor, systems security enthusiast, and web developer · Singapore</p>
+        <p class="landing-description">
+          I write down challenge analysis, exploit development, and the details I want
+          to remember later. I focus on binary exploitation, reverse engineering,
+          and security-oriented development with C, C++, and Python.
+        </p>
+      </div>
+    </div>
+    <div class="landing-hero-links" aria-label="Profile links">
+      <a href="mailto:nikola.winata.wang@gmail.com">Email</a>
+      <a href="https://ndgsghdj.github.io/articles">Blog</a>
+      <a href="https://github.com/ndgsghdj">GitHub</a>
+      <a href="https://www.linkedin.com/in/nikola-winata-0a39b6237/">LinkedIn</a>
+    </div>
+  </div>
+
+  <aside class="landing-hero-panel" aria-label="About the author">
+    <div class="landing-meta">
+      <span class="landing-meta-label">Current roles</span>
+      <span class="landing-meta-value">Systems Security Enthusiast</span>
+      <span class="landing-meta-value">Web Developer</span>
+      <span class="landing-meta-value">CTF Competitor</span>
+    </div>
+    <div class="landing-meta">
+      <span class="landing-meta-label">Education</span>
+      <span class="landing-meta-value">Anglo-Chinese Junior College</span>
+      <span class="landing-meta-support">2025–2026, H2 Computing and H2 Further Mathematics</span>
+      <span class="landing-meta-value">School of Science and Technology</span>
+      <span class="landing-meta-support">2021–2024, Computing and Additional Mathematics</span>
+    </div>
+    <div class="landing-meta">
+      <span class="landing-meta-label">Security tools</span>
+      <span class="landing-meta-value">Linux, GDB, Pwntools, Ghidra</span>
+      <span class="landing-meta-support">QEMU, Docker, Git, Assembly</span>
+    </div>
+    <div class="landing-meta">
+      <span class="landing-meta-label">Latest writeup</span>
+      <span class="landing-meta-value"><%= writeups[0] ? writeups[0].date : '—' %></span>
+    </div>
+  </aside>
+</section>
+
 <section id="collection-container">
+  <div class="collection-heading">
+    <p class="landing-kicker">Archive</p>
+    <h2>Writeups</h2>
+  </div>
+
   <ul class="writeup-list">
     <% writeups.forEach((writeup) => { %>
       <li class="writeup-list-item">
