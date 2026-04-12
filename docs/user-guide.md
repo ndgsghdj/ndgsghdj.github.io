@@ -238,6 +238,11 @@ The repository includes a GitHub Actions workflow that:
 The workflow uses `SITE_BASE_PATH` automatically so project pages work without
 manual path changes.
 
+The workflow automatically detects user sites and project pages:
+
+- `*.github.io` repositories use `/`
+- other repositories use `/<repo-name>/`
+
 If you are deploying a project page manually, keep the base path in mind:
 
 - User site: `/`

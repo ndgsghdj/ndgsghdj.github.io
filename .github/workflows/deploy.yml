@@ -34,7 +34,7 @@ jobs:
       - name: Build site
         run: npm run build
         env:
-          SITE_BASE_PATH: /${{ github.event.repository.name }}/
+          SITE_BASE_PATH: /
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
