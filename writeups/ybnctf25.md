@@ -270,7 +270,7 @@ However, in aarch64, the stack as well as the operations are different:
 
 For example, referring to one of the gadgets given:
 
-```
+```asm
 0x0000000000430418: ldp x0, x1, [sp, #0x20]; ldr x16, [sp, #8]; add sp, sp, #0xe0; br x16; 
 ```
 
@@ -278,7 +278,7 @@ The `ldp` (load-pair) instruction in this gadget loads a pair of 8 byte values i
 
 Suppose we had a write directly on to the address sp is pointing to. Then, we would have to set x0, x1 because they are argument registers, as well as x16 to control execution flow. In order to do that, the payload have to look like the following:
 
-```
+```asm
 sp+0x00: 0x4141414141414141 # dummy
 sp+0x08: 0xaabbccddeeffgg00 # x16
 sp+0x10: 0x4141414141414141 # dummy
@@ -370,7 +370,7 @@ Let us take note of the specific decrementation and incrementation of sp from th
 
 To put it into perspective:
 
-```
+```asm
 sp+0x00: 
 sp+0x08: 
 sp+0x10: <read>
@@ -394,7 +394,7 @@ Furthermore, note that at the end of `main()`, there is an increment of 32 (0x10
 
 We can draft a layout as such:
 
-```
+```asm
 0x00:             b'A'*8
 0x08:             b'A'*8
 0x10:             <dummy x29 value> 
@@ -445,7 +445,7 @@ We can first use (3) to set x2 to NULL which is required for our execve call. Th
 
 This gives us a layout as such:
 
-```
+```asm
 0x00:             b'A'*8
 0x08:             b'A'*8
 0x10:             <dummy x29 value> 
