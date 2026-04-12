@@ -151,9 +151,8 @@ img {
 }
 
 .landing-profile {
-  display: grid;
-  grid-template-columns: 168px minmax(0, 1fr);
-  gap: 24px;
+  display: flex;
+  gap: 22px;
   align-items: start;
 }
 
@@ -166,15 +165,16 @@ img {
   border: 1px solid var(--border);
   background: var(--mantle);
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.25);
-  justify-self: start;
+  flex: 0 0 168px;
 }
 
 .landing-profile-copy {
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .landing-kicker {
-  margin: 8px 0 10px;
+  margin: 2px 0 8px;
   color: var(--soft);
   font-family: "IBM Plex Mono", Consolas, Monaco, monospace;
   font-size: 11px;
@@ -183,9 +183,9 @@ img {
 }
 
 .landing-hero-copy h1 {
-  font-size: clamp(2.5rem, 5vw, 4.3rem);
-  line-height: 1;
-  max-width: 9ch;
+  font-size: clamp(2.05rem, 4.2vw, 3.45rem);
+  line-height: 1.04;
+  max-width: 100%;
 }
 
 .landing-description {
@@ -778,13 +778,13 @@ img {
   }
 
   .landing-profile {
-    grid-template-columns: 1fr;
     gap: 16px;
   }
 
   .landing-avatar {
-    width: 132px;
-    height: 132px;
+    width: 120px;
+    height: 120px;
+    flex-basis: 120px;
   }
 
   #writeup-navigation .writeup-navigation-next,
