@@ -1,0 +1,6 @@
+<figure class="component component-figure">
+  <img src="<%= attributes.src %>" alt="<%= attributes.alt || '' %>" loading="lazy" />
+  <% if (attributes.caption) { %>
+    <figcaption><%= attributes.caption %></figcaption>
+  <% } %>
+</figure>

@@ -1,0 +1,25 @@
+<section id="collection-container">
+  <ul class="writeup-list">
+    <% writeups.forEach((writeup) => { %>
+      <li class="writeup-list-item">
+        <a href="<%= asset(`writeups/${writeup.slug}.html`) %>">
+          <h1><%= writeup.title %></h1>
+          <% if (writeup.subtitle) { %>
+            <h2><%= writeup.subtitle %></h2>
+          <% } %>
+          <time><%= writeup.date %></time>
+          <% if (writeup.excerpt) { %>
+            <p class="writeup-excerpt"><%= writeup.excerpt %></p>
+          <% } %>
+          <% if (writeup.tags.length) { %>
+            <ul class="writeup-tags">
+              <% writeup.tags.forEach((tag) => { %>
+                <li>#<%= tag %></li>
+              <% }) %>
+            </ul>
+          <% } %>
+        </a>
+      </li>
+    <% }) %>
+  </ul>
+</section>

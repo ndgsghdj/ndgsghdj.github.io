@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#1e1e2e" />
+  <meta name="description" content="<%= siteDescription %>" />
+  <title><%= title %></title>
+
+  <link rel="stylesheet" href="<%= asset('styles/site.css') %>" />
+</head>
+<body class="<%= pageClass %>">
+  <header id="top-container" role="navigation">
+    <nav class="site-nav-shell">
+      <a class="logo-link" href="<%= asset('index.html') %>">
+        <h1><%= siteName %></h1>
+        <span><%= siteDescription %></span>
+      </a>
+      <small>
+        <a class="info-link" href="<%= asset('index.html') %>">Writeups</a>
+      </small>
+    </nav>
+  </header>
+
+  <main id="main-container">
+    <%- body %>
+  </main>
+</body>
+</html>

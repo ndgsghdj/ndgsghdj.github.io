@@ -1,0 +1,46 @@
+<article class="writeup-page">
+  <header class="writeup-header">
+    <h1 id="writeup-title"><%= writeup.title %></h1>
+    <% if (writeup.subtitle) { %>
+      <h2 id="writeup-subtitle"><%= writeup.subtitle %></h2>
+    <% } %>
+    <time id="writeup-date"><%= writeup.date %></time>
+  </header>
+
+  <section class="writeup-body-card">
+    <section id="writeup-content-container">
+      <%- writeup.html %>
+    </section>
+
+    <section id="writeup-navigation">
+      <% if (nextWriteup) { %>
+        <div class="writeup-navigation-item writeup-navigation-next">
+          <a href="<%= asset(`writeups/${nextWriteup.slug}.html`) %>">
+            <div class="writeup-navigation-arrow writeup-navigation-next">＜</div>
+            <div class="writeup-navigation-content writeup-navigation-next">
+              <p class="writeup-navigation-title"><%= nextWriteup.title %></p>
+              <p class="writeup-navigation-subtitle"><%= nextWriteup.subtitle || '' %></p>
+            </div>
+          </a>
+        </div>
+      <% } %>
+      <% if (prevWriteup) { %>
+        <div class="writeup-navigation-item writeup-navigation-prev">
+          <a href="<%= asset(`writeups/${prevWriteup.slug}.html`) %>">
+            <div class="writeup-navigation-arrow writeup-navigation-prev">＞</div>
+            <div class="writeup-navigation-content writeup-navigation-prev">
+              <p class="writeup-navigation-title"><%= prevWriteup.title %></p>
+              <p class="writeup-navigation-subtitle"><%= prevWriteup.subtitle || '' %></p>
+            </div>
+          </a>
+        </div>
+      <% } %>
+    </section>
+  </section>
+
+  <section id="writeup-list-button-container">
+    <a href="<%= asset('index.html') %>">
+      <div id="writeup-list-button">📚</div>
+    </a>
+  </section>
+</article>
