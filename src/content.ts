@@ -4,7 +4,7 @@ import dayjs from 'dayjs';
 
 import { parseFrontMatter } from './frontMatter';
 import { repoRoot } from './site';
-import { createMarkdownRenderer, renderMarkdown } from './markdown';
+import { createMarkdownRenderer, renderMarkdown, renderMarkdownInline } from './markdown';
 import { renderComponentShortcodes } from './components';
 
 export interface Writeup {
@@ -75,7 +75,11 @@ function normalizeDate(value: string): string {
 }
 
 function renderBody(body: string): string {
-  const withComponents = renderComponentShortcodes(body, renderBody);
+  const withComponents = renderComponentShortcodes(
+    body,
+    renderBody,
+    (input) => renderMarkdownInline(markdown, input),
+  );
   return renderMarkdown(markdown, withComponents);
 }
 

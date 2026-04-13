@@ -71,3 +71,7 @@ export function createMarkdownRenderer() {
 export function renderMarkdown(renderer: MarkdownIt, source: string): string {
   return renderer.render(source);
 }
+
+export function renderMarkdownInline(renderer: MarkdownIt, source: string): string {
+  return renderer.renderInline(source);
+}

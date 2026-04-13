@@ -48,18 +48,18 @@ function buildIndex(writeups: Writeup[], basePath: string) {
     basePath,
     asset: (target: string) => joinUrl(basePath, target),
     siteName: 'Writeups',
-    siteDescription: 'A writeups-only static blog with embedded components.',
+    siteDescription: "Nikola's blog",
   });
 
   return wrapLayout({
     title: 'Writeups',
-    description: 'Writeups-only static blog with embedded components.',
+    description: 'pwn writeups',
     pageClass: 'page-home',
     body,
     basePath,
     asset: (target: string) => joinUrl(basePath, target),
     siteName: 'Writeups',
-    siteDescription: 'A writeups-only static blog with embedded components.',
+    siteDescription: 'pwn writeups',
   });
 }
 

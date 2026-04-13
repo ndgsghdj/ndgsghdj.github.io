@@ -10,6 +10,8 @@ archive with individual writeup pages.
 - A centered, static writeups site
 - Markdown writeups with syntax-highlighted code blocks
 - Component shortcodes for custom HTML blocks
+- A `color` shortcode with Catppuccin aliases and hex fallback
+- A `terminal` shortcode for preformatted terminal-style output
 - Automatic table of contents generation
 - GitHub Pages deployment through GitHub Actions
 
@@ -171,7 +173,11 @@ Some components can be self-closing:
 The repository includes:
 
 - `callout`
+- `color`
 - `figure`
+
+The `color` component accepts Catppuccin Mocha aliases such as `blue`,
+`rosewater`, and `surface0`, or any valid hex color like `#fab387`.
 
 ### Creating a New Component
 
@@ -186,6 +192,55 @@ Example component template:
   <%- content %>
 </div>
 ```
+
+### Inline Color Marks
+
+Use the `color` component when you want to color a short span of text in a
+writeup.
+
+Catppuccin aliases are supported directly:
+
+```md
+{{< component name="color" color="blue" >}}linked text{{< /component >}}
+{{< component name="color" color="rosewater" >}}highlighted text{{< /component >}}
+```
+
+For custom values, use a hex code:
+
+```md
+{{< component name="color" color="#fab387" >}}orange text{{< /component >}}
+```
+
+Supported aliases follow the Catppuccin Mocha palette, including:
+
+- `rosewater`, `flamingo`, `pink`, `mauve`
+- `red`, `maroon`, `peach`, `yellow`
+- `green`, `teal`, `sky`, `sapphire`
+- `blue`, `lavender`
+- `text`, `subtext1`, `subtext0`
+- `overlay2`, `overlay1`, `overlay0`
+- `surface2`, `surface1`, `surface0`
+- `base`, `mantle`, `crust`
+
+### Terminal Output Blocks
+
+Use the `terminal` component when you want text to look like terminal output
+but still allow inline color spans.
+
+Example:
+
+```md
+{{< component name="terminal" >}}
+[*] '/home/user/chal'
+Arch:       amd64-64-little
+RELRO:      {{< component name="color" color="yellow" >}}Partial RELRO{{< /component >}}
+NX:         NX enabled
+PIE:        No PIE (0x3fe000)
+{{< /component >}}
+```
+
+This keeps the output preformatted and monospaced, while still letting the
+`color` shortcode style specific tokens.
 
 ## Images and Assets
 
