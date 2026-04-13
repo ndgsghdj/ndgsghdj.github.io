@@ -175,9 +175,19 @@ The repository includes:
 - `callout`
 - `color`
 - `figure`
+- `tcache-fd`
 
 The `color` component accepts Catppuccin Mocha aliases such as `blue`,
 `rosewater`, and `surface0`, or any valid hex color like `#fab387`.
+
+The `tcache-fd` component is a small interactive calculator for safe-linking
+tcache poisoning writeups. It defaults to:
+
+- tcache entry address: `0x4058c0`
+- initial fd: `0x000000405dd5`
+- target chunk address: `0x7ffff7e1b780`
+
+It computes the mangled fd using `fd ^ (entry >> 12)` and updates as you type.
 
 ### Creating a New Component
 
@@ -241,6 +251,20 @@ PIE:        No PIE (0x3fe000)
 
 This keeps the output preformatted and monospaced, while still letting the
 `color` shortcode style specific tokens.
+
+### Tcache FD Calculator
+
+Use the `tcache-fd` component when you want an interactive safe-linking helper
+inside a writeup.
+
+Example:
+
+```md
+{{< component name="tcache-fd" />}}
+```
+
+The widget lets a reader type a target chunk address and shows the mangled fd,
+safe-linking mask, and comparison against the initial fd.
 
 ## Images and Assets
 

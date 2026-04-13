@@ -33,7 +33,14 @@ function readTemplate(componentName: string): string {
     throw new Error(`Unknown component '${componentName}'. Create ${templatePath} to add it.`);
   }
 
-  return String(fs.readFileSync(templatePath));
+  return normalizeTemplate(String(fs.readFileSync(templatePath)));
+}
+
+function normalizeTemplate(template: string): string {
+  return template
+    .replace(/\r?\n\s*/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
 }
 
 function renderComponent(componentName: string, attributes: ComponentAttributes, content: string): string {

@@ -53,13 +53,13 @@ function buildIndex(writeups: Writeup[], basePath: string) {
 
   return wrapLayout({
     title: 'Writeups',
-    description: 'pwn writeups',
+    description: 'pwn writeups and stuff',
     pageClass: 'page-home',
     body,
     basePath,
     asset: (target: string) => joinUrl(basePath, target),
     siteName: 'Writeups',
-    siteDescription: 'pwn writeups',
+    siteDescription: 'pwn writeups and stuff',
   });
 }
 
@@ -74,7 +74,7 @@ function buildWriteup(writeup: Writeup, writeups: Writeup[], basePath: string, i
     basePath,
     asset: (target: string) => joinUrl(basePath, target),
     siteName: 'Writeups',
-    siteDescription: 'A writeups-only static blog with embedded components.',
+    siteDescription: "Nikola's blog",
   });
 
   return wrapLayout({
@@ -85,7 +85,7 @@ function buildWriteup(writeup: Writeup, writeups: Writeup[], basePath: string, i
     basePath,
     asset: (target: string) => joinUrl(basePath, target),
     siteName: 'Writeups',
-    siteDescription: 'A writeups-only static blog with embedded components.',
+    siteDescription: "pwn writeups and stuff",
   });
 }
 
